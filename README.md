@@ -12,6 +12,7 @@ test_cifar10.py
 
 Every training and testing file contains a "config" dictionary that stores the information about the experiment
 and hyperparemeters of the experiment.
+
     experiment_name: name of the this experiment, will create a directory with this name in "experiments/"
     experiment_type: repetitive or nonrepetitive. The former means all images in a group are the same.
     model: convvae, linearvae, dfcvae, or resnetvae.
@@ -30,3 +31,14 @@ and hyperparemeters of the experiment.
 
     log_file: name of log file
     load_saved: If true, load saved models from log file. Should change start_epoch accordingly.
+    
+To run experiments:
+1. Change "dataset_dir" variable in data_loaders.py. This is the directory for saving all datasets.
+2. Choose train_xxx.py based on which dataset you want to use.
+3. Change the "config" variable in train_xxx.py. Make sure "experiment_name" is changed every time
+    you run a new experiment.
+4. Double check the dataloader "ds" and model "model". Most of the times they are chosen automatically
+    based on "config", but "ds" in celeba and "ds", "model" in cifar10 are not.
+5. Run train_xxx.py
+6. Run test_xxx.py. Make sure "experiment_name" matches the the name used in train_xxx.py for the same
+    experiment.
