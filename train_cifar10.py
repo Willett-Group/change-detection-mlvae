@@ -15,8 +15,7 @@ import utils
 
 # configurations
 config = {
-    'experiment_name': 'celeba_personchange_linear_10epoch',
-    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'experiment_name': 'dfcvae_object_change_repetitive_T=50_10epoch',
 
     'N': 1000,
     'T': 50,
@@ -47,16 +46,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # load data set and create data loader instance
 print('Loading training data...')
-ds = data_loaders.celeba_change_person(config['N'], config['T'], train=True, seed=7)
-train_loader = DataLoader(ds, batch_size=config['b_size'], shuffle=False, drop_last=False) # shuffle or not?
+ds = data_loaders.cifar10_loader_repetitive(config['N'], config['T'], True, 7)
+train_loader = DataLoader(ds, batch_size=config['b_size']) # shuffle or not?
 
 # model definition
-if config['model'] == 'dfcvae':
-    model = networks.DFCVAE()
-elif config['model'] == 'convvae':
-    model = networks.convVAE()
-elif config['model'] == 'linearvae':
-    model = networks.linearVAE2(500, 500)
+model = networks.DFCVAE()
 model.to(device=device)
 
 # load saved models if load_saved flag is true
@@ -125,12 +119,11 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
         reconstruction = model.decode(style_z, content_z)
         reconstruction_error = utils.mse_loss(reconstruction, X)
         # feature loss
+        reconstruction_features = model.extract_features(reconstruction)
+        input_features = model.extract_features(X)
         feature_loss = 0.0
-        if config['model'] == 'dfcvae':
-            reconstruction_features = model.extract_features(reconstruction)
-            input_features = model.extract_features(X)
-            for (r, i) in zip(reconstruction_features, input_features):
-                feature_loss += utils.mse_loss(r, i)
+        for (r, i) in zip(reconstruction_features, input_features):
+            feature_loss += utils.mse_loss(r, i)
 
         # total_loss
         loss = (reconstruction_error+feature_loss) + config['beta']*(style_kl+content_kl)
@@ -146,8 +139,7 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
             print('Reconstruction loss: ' + str(reconstruction_error.data.storage().tolist()[0]))
             print('Style KL loss: ' + str(style_kl.data.storage().tolist()[0]))
             print('Content KL loss: ' + str(content_kl.data.storage().tolist()[0]))
-            if config['model'] == 'dfcvae':
-                print('Feature loss: ' + str(feature_loss.data.storage().tolist()[0]))
+            print('Feature loss: ' + str(feature_loss.data.storage().tolist()[0]))
         iteration += 1
 
         # write to log
@@ -167,9 +159,8 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
                         epoch * (int(len(ds) / config['b_size']) + 1) + iteration)
         writer.add_scalar('Content KL', content_kl.data.storage().tolist()[0],
                         epoch * (int(len(ds) / config['b_size']) + 1) + iteration)
-        if config['model'] == 'dfcvae':
-            writer.add_scalar('Feature loss', feature_loss.data.storage().tolist()[0],
-                            epoch * (int(len(ds) / config['b_size']) + 1) + iteration)
+        writer.add_scalar('Feature loss', feature_loss.data.storage().tolist()[0],
+                        epoch * (int(len(ds) / config['b_size']) + 1) + iteration)
 
     writer.add_scalar('Total loss', total_loss.item(), epoch)
     print('\nTotal loss: ' + str(total_loss.item()))

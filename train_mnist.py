@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from functools import partial
 
 import torch
 import torch.optim as optim
@@ -10,15 +11,23 @@ import data_loaders
 import networks
 import utils
 
+################################################################################
+# torch settings
+torch.set_printoptions(precision=6)
+print = partial(print, flush=True)
+
 
 ################################################################################
-
 # configurations
 config = {
-    'experiment_name': 'mnist_experiment3_30epochs',
+    'experiment_name': 'mnist_convvae_10epochs',
+    'experiment_type': 'repetitive', # or 'nonrepetitive'
+    'model': 'convvae', # or 'linearvae', 'naiveconvvae', 'resnetvae'
+    'n': 2000,
+    'T': 50,
 
     'start_epoch': 0,
-    'end_epoch': 30,
+    'end_epoch': 2,
     'b_size': 256,
     'initial_lr': 0.001,
     'beta': 1.0,
@@ -29,7 +38,6 @@ config = {
 
 
 ################################################################################
-
 # create necessary directories
 if not os.path.exists('experiments/'):
     os.makedirs('experiments')
@@ -39,22 +47,38 @@ if not os.path.exists(root_dir):
 with open(os.path.join(root_dir, 'config.txt'), 'w') as f:
     for key in config:
         f.write(key + ': ' + str(config[key]) + '\n')
+
 # use cpu or gpu
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # load data set and create data loader instance
 print('Loading training data...')
-ds = data_loaders.experiment3(1000, 50, 3)
-train_loader = DataLoader(ds, batch_size=config['b_size'])
+if config['experiment_type'] == 'repetitive':
+    ds = data_loaders.mnist_loader_repetitive(config['n'], config['T'], cp_way = 3,
+                                        train=True, seed=7, model=config['model'])
+else:
+    ds = data_loaders.mnist_loader(config['n'], config['T'], cp_way = 3,
+                                        train=True, seed=7, model=config['model'])
+train_loader = DataLoader(ds, batch_size=config['b_size'], shuffle=True, drop_last=False)
 
 # model definition
-model = networks.naive(20, 20)
-model.double()
+if config['model'] == 'linearvae':
+    model = networks.linearVAE(30, 30)
+elif config['model'] == 'dfcvae':
+    model = networks.DFCVAE()
+elif config['model'] == 'convvae':
+    model = networks.convVAE()
 model.to(device=device)
 
-# load saved models if load_saved flag is true
+# load saved models if loading from previously saved model parameters
+# initialize log file if not loading from previously saved model parameters
 if config['load_saved']:
     model.load_state_dict(torch.load(os.path.join(root_dir, 'model')))
+else:
+    with open(os.path.join(root_dir, config['log_file']), 'w') as log:
+        log.write('Epoch\tIteration\tReconstruction_loss\tStyle_KL\tContent_KL\n')
+# initialize summary writer
+writer = SummaryWriter()
 
 # optimizer definition
 optimizer = optim.Adam(
@@ -62,20 +86,10 @@ optimizer = optim.Adam(
     lr = config['initial_lr']
 )
 
-
-# load_saved is false when training is started from 0th iteration
-if not config['load_saved']:
-    with open(os.path.join(root_dir, config['log_file']), 'w') as log:
-        log.write('Epoch\tIteration\tReconstruction_loss\tStyle_KL\tContent_KL\n')
-# initialize summary writer
-writer = SummaryWriter()
-
-
-
+###############################################################################s
 # start training
 for epoch in range(config['start_epoch'], config['end_epoch']):
-    print()
-    print('Epoch #' + str(epoch) + '........................................................')
+    print('\nEpoch #' + str(epoch) + '..............................................')
 
     # the total loss at each epoch after running all iterations of batches
     total_loss = 0
@@ -96,7 +110,7 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
             content_mu.data, content_logvar.data, y
         )
 
-        # KL-divergence errors
+        # KL-divergence losses
         style_kl = -0.5*torch.sum(1+style_logvar-style_mu.pow(2)-style_logvar.exp())
         content_kl = -0.5*torch.sum(1+group_logvar-group_mu.pow(2)-group_logvar.exp())
         style_kl /= config['b_size'] * np.prod(ds.data_dim)
@@ -113,8 +127,19 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
         reconstruction = model.decode(style_z, content_z)
         reconstruction_error = utils.mse_loss(reconstruction, X)
 
+        # feature loss
+        
+        feature_loss = 0.0
+        if config['model'] == 'dfcvae':
+            reconstruction_features = model.extract_features(reconstruction)
+            input_features = model.extract_features(X)
+            for (r, i) in zip(reconstruction_features, input_features):
+                feature_loss += utils.mse_loss(r, i)
+        
+
         # total_loss
-        loss = (reconstruction_error) + config['beta']*(style_kl+content_kl)
+        # loss = (reconstruction_error) + config['beta']*(style_kl+content_kl)
+        loss = (reconstruction_error + feature_loss) + config['beta']*(style_kl+content_kl)
         loss.backward()
 
         optimizer.step()
@@ -122,11 +147,13 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
         total_loss += loss.detach()
 
         # print losses
-        if (iteration+1) % 20 == 0:
+        if (iteration+1) % 50 == 0:
             print('\tIteration #' + str(iteration))
             print('Reconstruction loss: ' + str(reconstruction_error.data.storage().tolist()[0]))
             print('Style KL loss: ' + str(style_kl.data.storage().tolist()[0]))
             print('Content KL loss: ' + str(content_kl.data.storage().tolist()[0]))
+            #if config['model'] == 'dfcvae':
+            #    print('Feature loss: ' + str(feature_loss.data.storage().tolist()[0]))
         iteration += 1
 
         # write to log
@@ -145,6 +172,9 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
         writer.add_scalar('Style KL', style_kl.data.storage().tolist()[0],
                         epoch * (int(len(ds) / config['b_size']) + 1) + iteration)
         writer.add_scalar('Content KL', content_kl.data.storage().tolist()[0],
+                        epoch * (int(len(ds) / config['b_size']) + 1) + iteration)
+        if config['model'] == 'dfcvae':
+            writer.add_scalar('Feature loss', content_kl.data.storage().tolist()[0],
                         epoch * (int(len(ds) / config['b_size']) + 1) + iteration)
 
     writer.add_scalar('Total loss', total_loss.item(), epoch)

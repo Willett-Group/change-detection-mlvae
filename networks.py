@@ -7,11 +7,11 @@ from torchvision import datasets
 import torchvision.models as models
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
+import torch.nn.functional as torchfunc
 
 import utils
 from utils import transform_config, reparameterize
 
-'''
 # implements the concatenated relu activation function
 class CReLU(nn.Module):
     def __init__(self):
@@ -21,33 +21,34 @@ class CReLU(nn.Module):
         x = torch.cat((x,-x),1)
         return torchfunc.relu(x)
 
-# Note their default cnn_embed_dim is 50
-class Encoder(nn.Module):
+
+class convVAE(nn.Module):
     def __init__(self, fc_hidden1=1024, fc_hidden2=768, CNN_embed_dim=100):
-        super(Encoder, self).__init__()
+        super(convVAE, self).__init__()
+
         self.fc_hidden1, self.fc_hidden2, self.CNN_embed_dim = fc_hidden1, fc_hidden2, CNN_embed_dim
 
         # 3x64x64
         self.convblock1 = nn.Sequential(
-            nn.Conv2d(in_channels=3,out_channels=64, stride=2, kernel_size=4),
+            nn.Conv2d(3, 64, stride=2, kernel_size=4),
             nn.BatchNorm2d(num_features=64),
             nn.ReLU()
         )
         # 64x31x31
         self.convblock2 = nn.Sequential(
-            nn.Conv2d(in_channels=64, out_channels=128, stride=2, kernel_size=4),
+            nn.Conv2d(64, 128, stride=2, kernel_size=4),
             nn.BatchNorm2d(num_features=128),
             nn.ReLU()
         )
         # 128x14x14
         self.convblock3 = nn.Sequential(
-            nn.Conv2d(in_channels=128, out_channels=256, stride=2, kernel_size=4),
+            nn.Conv2d(128, 256, stride=2, kernel_size=4),
             nn.BatchNorm2d(num_features=256),
             nn.ReLU()
         )
         # 256x6x6
         self.convblock4 = nn.Sequential(
-            nn.Conv2d(in_channels=256, out_channels=512, stride=2, kernel_size=4),
+            nn.Conv2d(256, 512, stride=2, kernel_size=4),
             nn.BatchNorm2d(num_features=512),
             nn.ReLU()
         )
@@ -74,27 +75,6 @@ class Encoder(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, x):
-        x = self.convblock1(x)
-        x = self.convblock2(x)
-        x = self.convblock3(x)
-        x = self.convblock4(x)
-        x = x.flatten(start_dim=1)
-        x = self.fullyconnected1(x)
-        x = self.fullyconnected2(x)
-
-        # The 5x multiplier is from the paper. No clue why
-        style_mu, style_logvar = self.stylemulayer(x), 5*self.stylelogvarlayer(x)
-        content_mu, content_logvar = self.contentmulayer(x), 5*self.contentlogvarlayer(x)
-
-        return style_mu, style_logvar, content_mu, content_logvar
-
-
-# This is messed up, but their instructions don't actually describe a network that works
-class Decoder(nn.Module):
-    def __init__(self, fc_hidden1=1024, fc_hidden2=768, CNN_embed_dim=100):
-        super(Decoder, self).__init__()
-        self.fc_hidden1, self.fc_hidden2, self.CNN_embed_dim = fc_hidden1, fc_hidden2, CNN_embed_dim
 
         self.deconvblock1 = nn.Sequential(
             nn.ConvTranspose2d(in_channels=2*CNN_embed_dim, out_channels=256, stride=2, kernel_size=4, output_padding=1),
@@ -125,8 +105,23 @@ class Decoder(nn.Module):
             nn.ConvTranspose2d(in_channels=64, out_channels=3, stride=1, kernel_size=3),
             nn.Tanh()
         )
+    
+    def encode(self, x):
+        x = self.convblock1(x)
+        x = self.convblock2(x)
+        x = self.convblock3(x)
+        x = self.convblock4(x)
+        x = x.flatten(start_dim=1)
+        x = self.fullyconnected1(x)
+        x = self.fullyconnected2(x)
 
-    def forward(self, style_z, content_z):
+        # The 5x multiplier is from the paper. No clue why
+        style_mu, style_logvar = self.stylemulayer(x), 5*self.stylelogvarlayer(x)
+        content_mu, content_logvar = self.contentmulayer(x), 5*self.contentlogvarlayer(x)
+
+        return style_mu, style_logvar, content_mu, content_logvar
+
+    def decode(self, style_z, content_z):
         x = torch.cat((style_z, content_z), dim=1)
         x = x.view(-1, self.CNN_embed_dim*2, 1,1)
         x = self.deconvblock1(x)
@@ -140,17 +135,8 @@ class Decoder(nn.Module):
         return output_mu
 
 
-def main():
-    test_encoder_input = torch.zeros((16,3,64,64))
-    test_decoder_input = torch.zeros((16,100))
-    test_decoder_input2 = torch.zeros((16,100))
-    test_encoder = Encoder(CNN_embed_dim=100)
-    test_decoder = Decoder(CNN_embed_dim=100)
 
-    print(test_encoder(test_encoder_input)[0].shape)
-    print(test_decoder(test_decoder_input, test_decoder_input2).shape)
 
-'''
 
 class DFCVAE(nn.Module):
     def __init__(self, z_dim=128, hidden_dims = None, alpha=1.0, beta=0.5):
@@ -265,6 +251,9 @@ class DFCVAE(nn.Module):
         return features
 
 
+
+
+
 class resnetVAE(nn.Module):
     def __init__(self, fc_hidden1=1024, fc_hidden2=768, drop_p=0.3, z_dim=128):
         super(resnetVAE, self).__init__()
@@ -365,6 +354,10 @@ class resnetVAE(nn.Module):
 
         return features
 
+
+
+
+
 class z_classifier(nn.Module):
     def __init__(self, z_dim=128):
         super(z_classifier, self).__init__()
@@ -386,9 +379,13 @@ class z_classifier(nn.Module):
         x = self.block3(self.block2(self.block1(x)))
         return x
 
-class naive(nn.Module):
+
+
+
+
+class linearVAE(nn.Module):
     def __init__(self, style_dim, class_dim):
-        super(naive, self).__init__()
+        super(linearVAE, self).__init__()
 
         self.linear = nn.Sequential(
             nn.Linear(in_features=784, out_features=500, bias=True),
@@ -411,8 +408,6 @@ class naive(nn.Module):
         )
 
     def encode(self, x):
-        # delete this line when running approach2.py
-        # x = x.view(x.size(0), x.size(1) * x.size(2) * x.size(3))
         x = self.linear(x)
 
         style_z_mu = self.style_mu(x)
@@ -425,9 +420,50 @@ class naive(nn.Module):
     
     def decode(self, style_z, class_z):
         x = torch.cat((style_z, class_z), dim=1)
-
         x = self.linear2(x)
-        # delete this line when running approach2.py
-        # x = x.view(x.size(0), 1, 28, 28)
+
+        return x
+
+# linear vae for 64 by 64 by 3
+class linearVAE2(nn.Module):
+    def __init__(self, style_dim, class_dim):
+        super(linearVAE2, self).__init__()
+
+        self.linear = nn.Sequential(
+            nn.Linear(in_features=12288, out_features=5000, bias=True),
+            nn.Tanh()
+        )
+
+        # style
+        self.style_mu = nn.Linear(5000, style_dim, bias=True)
+        self.style_logvar = nn.Linear(5000, style_dim, bias=True)
+
+        # class
+        self.class_mu = nn.Linear(5000, class_dim, bias=True)
+        self.class_logvar = nn.Linear(5000, class_dim, bias=True)
+
+        self.linear2 = nn.Sequential(
+            nn.Linear(style_dim + class_dim, 5000, bias=True),
+            nn.Tanh(),
+            nn.Linear(5000, 12288, bias=True),
+            nn.Sigmoid()
+        )
+
+    def encode(self, x):
+        x = torch.flatten(x, start_dim=1)
+        x = self.linear(x)
+
+        style_z_mu = self.style_mu(x)
+        style_z_logvar = self.style_logvar(x)
+
+        class_z_mu = self.class_mu(x)
+        class_z_logvar = self.class_logvar(x)
+
+        return style_z_mu, style_z_logvar, class_z_mu, class_z_logvar
+    
+    def decode(self, style_z, class_z):
+        x = torch.cat((style_z, class_z), dim=1)
+        x = self.linear2(x)
+        x = x.view(-1, 3, 64, 64)
 
         return x

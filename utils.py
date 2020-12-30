@@ -29,6 +29,20 @@ transform_config3 = transforms.Compose([
     transforms.ToTensor()
 ])
 
+transform_rgb = transforms.Lambda(lambda image: image.convert('RGB'))
+transform_flatten = transforms.Lambda(lambda image: torch.flatten(image))
+
+transform_config4 = transforms.Compose([
+    transforms.Resize([64, 64]),
+    transform_rgb,
+    transforms.ToTensor()
+])
+
+transform_config5 = transforms.Compose([
+    transforms.ToTensor(),
+    transform_flatten
+])
+
 def accumulate_group_evidence(class_mu, class_logvar, labels_batch):
     """
     :param class_mu: mu values for class latent embeddings of each sample in the mini-batch

@@ -49,9 +49,9 @@ def extract_reconstructions(X, style_mu, class_mu, class_logvar, n_iterations):
 
     return reconstruction, reconstruction_error
 
-def get_reconstructions(model, X, eta):
+def get_reconstructions(model, X, eta, T):
     g1 = X[0:eta] # group 1 (before change point)
-    g2 = X[eta:10] # group 2 (after change point)
+    g2 = X[eta:T] # group 2 (after change point)
     style_mu_g1, _, class_mu_g1, class_logvar_g1 = model.encode(g1)
     style_mu_g2, _, class_mu_g2, class_logvar_g2 = model.encode(g2)
 
@@ -70,8 +70,13 @@ print = partial(print, flush=True)
 
 # make necessary directories
 config = {
-    'experiment_name': 'mnist_experiment3_30epochs',
-    'iterations': 20
+    'experiment_name': 'mnist_convvae_10epochs',
+    'experiment_type': 'repetitive', # or 'nonrepetitive'
+    'model': 'convvae', # or 'linearvae', 'naiveconvvae', 'resnetvae'
+    'iterations': 20,
+
+    'n': 30,
+    'T': 50
 }
 root_dir = 'experiments/' + config['experiment_name']
 recon = root_dir + '/reconstructions/'
@@ -85,14 +90,24 @@ for dir in [recon, sqerrors]:
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # model definition
-model = networks1.naive(20, 20)
+if config['model'] == 'linearvae':
+    model = networks.linearVAE(30, 30)
+elif config['model'] == 'dfcvae':
+    model = networks.DFCVAE()
+elif config['model'] == 'convvae':
+    model = networks.convVAE()
 # load saved parameters of model
 model.load_state_dict(torch.load(os.path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
 model = model.to(device=device)
 
 # load dataset
 print('Loading test data...')
-ds = data_loaders.experiment3(30, 10, 3, False)
+if config['experiment_type'] == 'repetitive':
+    ds = data_loaders.mnist_loader_repetitive(config['n'], config['T'], cp_way = 3,
+                                        train=False, seed=7, model=config['model'])
+else:
+    ds = data_loaders.mnist_loader(config['n'], config['T'], cp_way = 3,
+                                        train=False, seed=7, model=config['model'])
 eta_hats = [] # save predicted change points
 
 # iterate over test samples X_1, X_2, etc...
@@ -106,10 +121,10 @@ for i in range(ds.n):
 
     errors = {} # errors for all candidate etas
     min_eta = 2
-    max_eta = 8
+    max_eta = ds.T - 2
 
     for eta in range(min_eta, max_eta+1):
-        g1_reconstructions, g2_reconstructions, total_error = get_reconstructions(model, X, eta)
+        g1_reconstructions, g2_reconstructions, total_error = get_reconstructions(model, X, eta, ds.T)
         errors[eta] = total_error
 
     # finished iterating through candidate etas, now can get eta_hat = argmin eta
@@ -117,11 +132,14 @@ for i in range(ds.n):
     eta_hats.append(eta_hat)
 
     # save originals, reconstructions with smallest error, reconstructions with true eta
-    g1_reconstructions_hat, g2_reconstructions_hat, _ = get_reconstructions(model, X, eta_hat)
-    g1_reconstructions_true, g2_reconstructions_true, _ = get_reconstructions(model, X, ds.cps[i])
-    grid = make_grid(torch.cat([X.view(-1, 1, 28, 28), g1_reconstructions_true.view(-1, 1, 28, 28),
-    g2_reconstructions_true.view(-1, 1, 28, 28)]), nrow=10)
-    # grid = make_grid(torch.cat([X, g1_reconstructions_hat, g2_reconstructions_hat, g1_reconstructions_true, g2_reconstructions_true]), nrow=5)
+    g1_reconstructions_hat, g2_reconstructions_hat, _ = get_reconstructions(model, X, eta_hat, ds.T)
+    g1_reconstructions_true, g2_reconstructions_true, _ = get_reconstructions(model, X, ds.cps[i], ds.T)
+    if config['model'] == 'linearvae':
+        grid = make_grid(torch.cat([X.view(-1, 1, 28, 28),
+                                g1_reconstructions_true.view(-1, 1, 28, 28),
+                                g2_reconstructions_true.view(-1, 1, 28, 28)]), nrow=ds.T)
+    else:
+        grid = make_grid(torch.cat([X, g1_reconstructions_hat, g2_reconstructions_hat]), nrow=ds.T)
     save_image(grid, recon+'X_{}.png'.format(i))
 
 

@@ -106,9 +106,7 @@ print("GPU IDs: " + str([int(x) for x in gpu_ids]), flush=True)
 
 # make necessary directories
 config = {
-    'experiment_name': 'celeba_personchange_linear_10epoch',
-    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
-
+    'experiment_name': 'dfcvae_object_change_repetitive_T=50_10epoch',
     'N': 30,
     'T': 50,
     'iterations': 2
@@ -125,19 +123,14 @@ for dir in [recon, sqerrors]:
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # model definition
-if config['model'] == 'dfcvae':
-    model = networks.DFCVAE()
-elif config['model'] == 'convvae':
-    model = networks.convVAE()
-elif config['model'] == 'linearvae':
-    model = networks.linearVAE2(500, 500)
+model = networks.DFCVAE()
 # load saved parameters of model
 model.load_state_dict(torch.load(os.path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
 model = model.to(device=device)
 
 # load dataset
 print('Loading test data...')
-ds = data_loaders.celeba_change_person(config['N'], config['T'], 7, False)
+ds = data_loaders.cifar10_loader_repetitive(config['N'], config['T'], 7, False)
 eta_hats = [] # save predicted change points
 
 # iterate over test samples X_1, X_2, etc...
