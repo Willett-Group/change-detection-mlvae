@@ -84,7 +84,6 @@ def get_reconstructions(model, X, eta, T):
 torch.set_printoptions(precision=8)
 print = partial(print, flush=True)
 
-
 gpu_ids = []
 for ii in range(6):
     try:
@@ -106,8 +105,8 @@ print("GPU IDs: " + str([int(x) for x in gpu_ids]), flush=True)
 
 # make necessary directories
 config = {
-    'experiment_name': 'celeba_personchange_linear_10epoch',
-    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'experiment_name': '3',
+    'model': 'dfcvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
 
     'N': 30,
     'T': 50,
@@ -137,7 +136,7 @@ model = model.to(device=device)
 
 # load dataset
 print('Loading test data...')
-ds = data_loaders.celeba_change_person(config['N'], config['T'], 7, False)
+ds = data_loaders.celeba_gender_change(config['N'], config['T'], 7, False)
 eta_hats = [] # save predicted change points
 
 # iterate over test samples X_1, X_2, etc...

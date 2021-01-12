@@ -70,9 +70,9 @@ print = partial(print, flush=True)
 
 # make necessary directories
 config = {
-    'experiment_name': 'mnist_convvae_10epochs',
-    'experiment_type': 'repetitive', # or 'nonrepetitive'
-    'model': 'convvae', # or 'linearvae', 'naiveconvvae', 'resnetvae'
+    'experiment_name': '1',
+    'experiment_type': 'nonrepetitive', # or 'nonrepetitive'
+    'model': 'dfcvae', # or 'linearvae', 'naiveconvvae', 'resnetvae'
     'iterations': 20,
 
     'n': 30,
@@ -91,7 +91,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # model definition
 if config['model'] == 'linearvae':
-    model = networks.linearVAE(30, 30)
+    model = networks.linearVAE(20, 20)
 elif config['model'] == 'dfcvae':
     model = networks.DFCVAE()
 elif config['model'] == 'convvae':

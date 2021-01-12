@@ -15,8 +15,8 @@ import utils
 
 # configurations
 config = {
-    'experiment_name': 'celeba_personchange_linear_10epoch',
-    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'experiment_name': '5',
+    'model': 'dfcvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
 
     'N': 1000,
     'T': 50,
@@ -24,7 +24,7 @@ config = {
     'end_epoch': 10,
     'b_size': 256,
     'initial_lr': 0.001,
-    'beta': 1.0, # parameter of KL term
+    'beta': 10, # parameter of KL term
 
     'log_file': 'log.txt',
     'load_saved': False
@@ -47,7 +47,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # load data set and create data loader instance
 print('Loading training data...')
-ds = data_loaders.celeba_change_person(config['N'], config['T'], train=True, seed=7)
+ds = data_loaders.celeba_gender_change(config['N'], config['T'], train=True, seed=7)
 train_loader = DataLoader(ds, batch_size=config['b_size'], shuffle=False, drop_last=False) # shuffle or not?
 
 # model definition

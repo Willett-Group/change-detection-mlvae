@@ -20,17 +20,18 @@ print = partial(print, flush=True)
 ################################################################################
 # configurations
 config = {
-    'experiment_name': 'mnist_convvae_10epochs',
-    'experiment_type': 'repetitive', # or 'nonrepetitive'
-    'model': 'convvae', # or 'linearvae', 'naiveconvvae', 'resnetvae'
-    'n': 2000,
+    'experiment_name': '1',
+    'experiment_type': 'nonrepetitive', # or 'nonrepetitive'
+    'model': 'dfcvae', # or 'linearvae', 'naiveconvvae', 'resnetvae'
+    'n': 1000,
     'T': 50,
+    'z_dim': 20,
 
     'start_epoch': 0,
-    'end_epoch': 2,
+    'end_epoch': 5,
     'b_size': 256,
     'initial_lr': 0.001,
-    'beta': 1.0,
+    'beta': 5000,
 
     'log_file': 'log.txt',
     'load_saved': False
@@ -63,7 +64,7 @@ train_loader = DataLoader(ds, batch_size=config['b_size'], shuffle=True, drop_la
 
 # model definition
 if config['model'] == 'linearvae':
-    model = networks.linearVAE(30, 30)
+    model = networks.linearVAE(config['z_dim'], config['z_dim'])
 elif config['model'] == 'dfcvae':
     model = networks.DFCVAE()
 elif config['model'] == 'convvae':
