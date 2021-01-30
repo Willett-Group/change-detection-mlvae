@@ -2,6 +2,7 @@ import random
 import os
 import numpy as np
 from PIL import Image
+import pickle
 
 import torch
 from torchvision import datasets
@@ -35,11 +36,21 @@ class celeba_gender_change(Dataset):
         self.cps = [random.choice(possible_cps) for _ in range(n)]
         self.men_indices = []
         self.women_indices = []
-        for i in range(len(self.celeba)):
-            if self.celeba[i][1][20] == 1:
-                self.men_indices.append(i)
-            else:
-                self.women_indices.append(i)
+
+        pickle_file_path = 'experiments/celeba_gender/indices.pkl'
+        if os.path.exists(pickle_file_path):
+            with open(pickle_file_path, 'rb') as f:
+                self.men_indices = pickle.load(f)
+                self.women_indices = pickle.load(f)
+        else:
+            for i in range(len(self.celeba)):
+                if self.celeba[i][1][20] == 1:
+                    self.men_indices.append(i)
+                else:
+                    self.women_indices.append(i)
+            with open(pickle_file_path, 'wb') as f:
+                pickle.dump(self.men_indices, f)
+                pickle.dump(self.women_indices, f)
 
     def __len__(self):
         return self.n*self.T
@@ -325,6 +336,50 @@ class cifar10_loader_repetitive(Dataset):
         sample = self.cifar[self.groups_iterated[label]][0]
 
         return sample, label
+
+    def get_time_series_sample(self, n):
+        X = torch.empty(size=(self.T,) + self.data_dim)
+        for t in range(self.T):
+            X[t] = self.__getitem__(self.T*n + t)[0]
+        return X
+
+
+
+class clevr_change(Dataset):
+    def __init__(self, transform_configuration):
+        dir1 = os.path.join(dataset_dir, 'nsc_images/')
+        all_filenames = os.listdir(dir1)
+        self.transform = transform_configuration
+        image_1 = Image.open(dir1 + all_filenames[0]).convert('RGB')
+        self.data_dim = self.transform(image_1).shape
+
+        cps = {}
+        for filename in all_filenames:
+            _, _, i, t = filename.split('_') # i-th image at time t
+            t = int(t[:-4])
+            i = int(i)
+            cps[i] = cps.get(i, 0) + 1
+
+        self.cps = cps
+        self.n = len(cps)
+        self.T = 10
+
+    def __len__(self):
+        return self.n*self.T
+
+    def __getitem__(self, item):
+        i, t = item // self.T, item % self.T
+
+        if t < self.cps[i]:
+            label = 2*i
+            file_name = os.path.join(dataset_dir, 'nsc_images', 'CLEVR_nonsemantic_'+str(i).zfill(6)+'_'+str(t)+'.png')
+            img = Image.open(file_name).convert('RGB')
+        else:
+            label = 2*i+1
+            file_name = os.path.join(dataset_dir, 'sc_images', 'CLEVR_semantic_'+str(i).zfill(6)+'_'+str(t-self.cps[i])+'.png')
+            img = Image.open(file_name).convert('RGB')
+
+        return self.transform(img), label
 
     def get_time_series_sample(self, n):
         X = torch.empty(size=(self.T,) + self.data_dim)

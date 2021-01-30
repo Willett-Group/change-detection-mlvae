@@ -103,17 +103,17 @@ print("GPU IDs: " + str([int(x) for x in gpu_ids]), flush=True)
 
 # make necessary directories
 config = {
-    'experiment_setting': 'celeba_gender',
+    'experiment_setting': 'clevr_change',
     'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
 
-    'N': 30,
-    'T': 50,
     'iterations': 20
 }
+
 dir1 = 'experiments/' + config['experiment_setting']
 for dir in os.listdir(dir1):
-    print('Running directory', dir)
-    if dir.isdigit() and int(dir) in [6]:
+    if dir.isdigit():
+        print('Running directory', dir)
+
         root_dir = os.path.join(dir1, dir)
         recon = root_dir + '/reconstructions/'
         sqerrors = root_dir + '/sqerrors/'
@@ -121,9 +121,6 @@ for dir in os.listdir(dir1):
         for dir in [recon, sqerrors]:
             if not os.path.exists(dir):
                 os.makedirs(dir)
-
-        # use gpu or cpu
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # model definition
         if config['model'] == 'dfcvae':
@@ -138,12 +135,15 @@ for dir in os.listdir(dir1):
 
         # load dataset
         print('Loading test data...')
-        ds = data_loaders.celeba_gender_change(config['N'], config['T'], 7, False)
+        ds = data_loaders.clevr_change(utils.transform_config2)
         eta_hats = [] # save predicted change points
 
-        # iterate over test samples X_1, X_2, etc...
-        for i in range(ds.n):
-            print('Running time series sample X_'+str(i))
+        # iterate over test samples
+        # range must be within 2800
+        all_i = [400*(i-1)+j for i in range(1,7) for j in range(5)]
+        counter = 0
+        print('Running time series test samples...')
+        for i in all_i:
             
             # load the test sample X_i
             X = ds.get_time_series_sample(i)
@@ -171,7 +171,6 @@ for dir in os.listdir(dir1):
             
             g1_mul_ratio = torch.div(256, torch.amax(g1_subtracted, dim=(0)))
             g2_mul_ratio = torch.div(256, torch.amax(g2_subtracted, dim=(0)))
-            print(g1_mul_ratio.size())
 
             g1_subtracted_normalized = torch.mul(g1_subtracted, g1_mul_ratio)
             g2_subtracted_normalized = torch.mul(g2_subtracted, g2_mul_ratio)
@@ -181,7 +180,7 @@ for dir in os.listdir(dir1):
             g1_subtracted, g2_subtracted,
             g1_subtracted_normalized, g2_subtracted_normalized
             ]), nrow=ds.T)
-            save_image(grid, recon+'X_{}.png'.format(i))
+            save_image(grid, recon+'X_{}_{}.png'.format(counter, i))
 
 
             # save square errors
@@ -191,8 +190,10 @@ for dir in os.listdir(dir1):
             plt.title(config['experiment_setting'])
             plt.xlabel('etas (red: eta_hat, blue: true eta)')
             plt.ylabel('squared errors')
-            plt.savefig(sqerrors+'X_{}.jpg'.format(i))
+            plt.savefig(sqerrors+'X_{}_{}.png'.format(counter, i))
             plt.close()
+
+            counter += 1
 
         with open(root_dir+'/cps.txt', 'w') as cps_r:
             for tmp in eta_hats:

@@ -1,71 +1,83 @@
 import os
+import shutil
 import numpy as np
+import random
+import pickle
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import ImageGrid
+from multiprocessing import Pool
+from functools import partial
 
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torchvision.utils import save_image
+from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 import data_loaders
 import networks
 import utils
 
-
-################################################################################
-
+########################################################################################
 # configurations
 config = {
-    'experiment_setting': 'celeba_gender',
-    'model': 'dfcvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'experiment_setting': 'clevr_change',
+    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
 
-    'N': 1000,
-    'T': 50,
     'start_epoch': 0,
     'end_epoch': 10,
     'b_size': 256,
     'initial_lr': 0.0001,
-    'beta1': [100], # style kl
-    'beta2': [0.1], # content kl
-    # 10000 and 10 works better
+    'beta1': [1,10,100,1000], # style kl param
+    'beta2': [1,10,100,1000], # content kl param
 
     'log_file': 'log.txt',
-    'load_saved': False
+    'load_saved': False,
 }
 
 
-################################################################################
+#########################################################################################
 for beta1 in config['beta1']:
     for beta2 in config['beta2']:
+        print('\nRunning beta1 = {} beta2 = {}'.format(beta1, beta2))
         # create necessary directories
         if not os.path.exists('experiments/'):
             os.makedirs('experiments')
         dir1 = os.path.join('experiments', config['experiment_setting'])
         if not os.path.exists(dir1):
             os.makedirs(dir1)
-        if not os.listdir(dir1):
-            new_dir = '1'
-        else:
-            dirs = []
-            for f in os.listdir(dir1):
-                if f.isdigit():
-                    dirs.append(int(f))
-            new_dir = str(max(dirs)+1)
+
+        # delete directories created by not running at least 1 epoch
+        numbered_dirs = [int(f) for f in os.listdir(dir1) if f.isdigit()]
+        for nd in numbered_dirs:
+            nd_path = os.path.join('experiments', config['experiment_setting'], str(nd))
+            if 'model' not in os.listdir(nd_path):
+                shutil.rmtree(nd_path)
+        
+        # create new directory for this run
+        numbered_dirs = [int(f) for f in os.listdir(dir1) if f.isdigit()]
+        new_dir = str(max(numbered_dirs)+1) if os.listdir(dir1) else '1'
         root_dir = os.path.join('experiments', config['experiment_setting'], new_dir)
         if not os.path.exists(root_dir):
             os.makedirs(root_dir)
+        
+        # save configuration information
         with open(os.path.join(root_dir, 'config.txt'), 'w') as f:
             for key in config:
                 f.write(key + ': ' + str(config[key]) + '\n')
             f.write('beta1' + ': ' + str(beta1) + '\n')
             f.write('beta2' + ': ' + str(beta2) + '\n')
+        
+        #####################################################################################
         # use cpu or gpu
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # load data set and create data loader instance
         print('Loading training data...')
-        ds = data_loaders.celeba_gender_change(config['N'], config['T'], train=True, seed=7)
-        train_loader = DataLoader(ds, batch_size=config['b_size'], shuffle=False, drop_last=False) # shuffle or not?
-
+        ds = data_loaders.clevr_change(utils.transform_config2)
+        # shuffle or not?
+        train_loader = DataLoader(ds, batch_size=config['b_size'], shuffle=False, drop_last=False)
 
         # model definition
         if config['model'] == 'dfcvae':
@@ -98,19 +110,13 @@ for beta1 in config['beta1']:
 
         # start training
         for epoch in range(config['start_epoch'], config['end_epoch']):
-            print()
-            print('Epoch #' + str(epoch) + '........................................................')
+            print('Epoch {}'.format(epoch))
 
             # the total loss at each epoch after running all iterations of batches
             total_loss = 0
             iteration = 0
 
             for batch_index, (X, y) in enumerate(train_loader):
-                '''
-                if iteration > config['end_iteration']:
-                    torch.save(model.state_dict(), os.path.join(root_dir, 'model'))
-                    exit()
-                '''
                 # set zero grad for the optimizer
                 optimizer.zero_grad()
 
@@ -158,7 +164,7 @@ for beta1 in config['beta1']:
                 total_loss += loss.detach()
 
                 # print losses
-                if (iteration+1) % 20 == 0:
+                if (iteration+1) % 30 == 0:
                     print('\tIteration #' + str(iteration))
                     print('Reconstruction loss: ' + str(reconstruction_error.data.storage().tolist()[0]))
                     print('Style KL loss: ' + str(style_kl.data.storage().tolist()[0]))
