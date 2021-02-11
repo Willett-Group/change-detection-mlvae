@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
 
 config = {
-    'experiment_setting': 'celeba_gender',
-    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'experiment_setting': 'clevr_change',
+    'model': 'dfcvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
 }
 
 root_dir = 'experiments/' + config['experiment_setting'] + '/' + config['model']
@@ -37,7 +37,9 @@ for dir in os.listdir(root_dir):
             means.append(np.sum(diff) / len(diff))
             stds.append(np.std(diff))
 
-
+sorted_labels = sorted(zip(means, ticks), key=lambda pair:pair[0])
+means = [x for x,_ in sorted_labels]
+ticks = [x for _,x in sorted_labels]
 
 # plot the average of |eta - eta_hat| across test samples
 plt.errorbar(ticks, means, yerr=stds, fmt='o')
@@ -45,7 +47,6 @@ plt.xticks(ticks, ticks, fontsize=7)
 plt.xlabel('beta1, beta2 (style KL, content KL)')
 plt.ylabel('mean |eta-eta_hat|')
 plt.title(title)
-plt.savefig(os.path.join(root_dir, title+'.jpg'), dpi=500)
 plt.show()
 plt.close()
 

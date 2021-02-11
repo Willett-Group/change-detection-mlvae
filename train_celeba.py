@@ -15,8 +15,8 @@ import utils
 
 # configurations
 config = {
-    'experiment_setting': 'celeba_gender',
-    'model': 'dfcvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'experiment_setting': 'clevr_change',
+    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
 
     'N': 1000,
     'T': 50,

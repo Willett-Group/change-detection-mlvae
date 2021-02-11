@@ -104,7 +104,9 @@ print("GPU IDs: " + str([int(x) for x in gpu_ids]), flush=True)
 # make necessary directories
 config = {
     'experiment_setting': 'clevr_change',
-    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'model': 'dfcvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'dim_s': 30,
+    'dim_c': 30,
 
     'iterations': 20
 }
@@ -122,13 +124,15 @@ for dir in os.listdir(dir1):
             if not os.path.exists(dir):
                 os.makedirs(dir)
 
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
         # model definition
         if config['model'] == 'dfcvae':
             model = networks.DFCVAE()
         elif config['model'] == 'convvae':
             model = networks.convVAE()
         elif config['model'] == 'linearvae':
-            model = networks.linearVAE2(500, 500)
+            model = networks.linearVAE2(config['dim_s'], config['dim_c'])
         # load saved parameters of model
         model.load_state_dict(torch.load(os.path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
         model = model.to(device=device)
@@ -137,6 +141,7 @@ for dir in os.listdir(dir1):
         print('Loading test data...')
         ds = data_loaders.clevr_change(utils.transform_config2)
         eta_hats = [] # save predicted change points
+        etas = []
 
         # iterate over test samples
         # range must be within 2800
@@ -160,7 +165,9 @@ for dir in os.listdir(dir1):
             # finished iterating through candidate etas, now can get eta_hat = argmin eta
             eta_hat = min(errors, key=errors.get)
             eta_hats.append(eta_hat)
+            etas.append(ds.cps[i])
 
+            
             # save originals, reconstructions with smallest error, reconstructions with true eta
             g1_reconstructions_hat, g2_reconstructions_hat, _ = get_reconstructions(model, X, eta_hat, ds.T)
             g1_reconstructions_true, g2_reconstructions_true, _ = get_reconstructions(model, X, ds.cps[i], ds.T)
@@ -184,6 +191,7 @@ for dir in os.listdir(dir1):
 
 
             # save square errors
+            
             plt.scatter(list(errors.keys()), list(errors.values()))
             plt.axvline(x=ds.cps[i])
             plt.axvline(x=eta_hat, color='r')
@@ -192,6 +200,7 @@ for dir in os.listdir(dir1):
             plt.ylabel('squared errors')
             plt.savefig(sqerrors+'X_{}_{}.png'.format(counter, i))
             plt.close()
+            
 
             counter += 1
 
@@ -199,5 +208,5 @@ for dir in os.listdir(dir1):
             for tmp in eta_hats:
                 cps_r.write('{} '.format(tmp))
             cps_r.write('\n')
-            for tmp in ds.cps:
+            for tmp in etas:
                 cps_r.write('{} '.format(tmp))
