@@ -346,11 +346,13 @@ class cifar10_loader_repetitive(Dataset):
 
 
 class clevr_change(Dataset):
-    def __init__(self, transform_configuration):
-        dir1 = os.path.join(dataset_dir, 'nsc_images/')
-        all_filenames = os.listdir(dir1)
+    def __init__(self, name, T, transform_configuration):
+        self.dir1 = os.path.join(dataset_dir, name, 'nsc_images/')
+        self.dir2 = os.path.join(dataset_dir, name, 'sc_images/')
         self.transform = transform_configuration
-        image_1 = Image.open(dir1 + all_filenames[0]).convert('RGB')
+
+        all_filenames = os.listdir(self.dir1)
+        image_1 = Image.open(self.dir1 + all_filenames[0]).convert('RGB')
         self.data_dim = self.transform(image_1).shape
 
         cps = {}
@@ -362,7 +364,7 @@ class clevr_change(Dataset):
 
         self.cps = cps
         self.n = len(cps)
-        self.T = 10
+        self.T = T
 
     def __len__(self):
         return self.n*self.T
@@ -372,11 +374,11 @@ class clevr_change(Dataset):
 
         if t < self.cps[i]:
             label = 2*i
-            file_name = os.path.join(dataset_dir, 'nsc_images', 'CLEVR_nonsemantic_'+str(i).zfill(6)+'_'+str(t)+'.png')
+            file_name = os.path.join(self.dir1, 'CLEVR_nonsemantic_'+str(i).zfill(6)+'_'+str(t)+'.png')
             img = Image.open(file_name).convert('RGB')
         else:
             label = 2*i+1
-            file_name = os.path.join(dataset_dir, 'sc_images', 'CLEVR_semantic_'+str(i).zfill(6)+'_'+str(t-self.cps[i])+'.png')
+            file_name = os.path.join(self.dir2, 'CLEVR_semantic_'+str(i).zfill(6)+'_'+str(t-self.cps[i])+'.png')
             img = Image.open(file_name).convert('RGB')
 
         return self.transform(img), label

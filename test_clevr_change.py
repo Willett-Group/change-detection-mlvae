@@ -104,16 +104,20 @@ print("GPU IDs: " + str([int(x) for x in gpu_ids]), flush=True)
 # make necessary directories
 config = {
     'experiment_setting': 'clevr_change',
-    'model': 'dfcvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'dataset_dir': 'n=2800T=10_nolightchange',
+    'model': 'linearvae', # 'dfcvae', 'linearvae', 'convvae', 'resnetvae'
+    'T': 10,
+
     'dim_s': 30,
     'dim_c': 30,
 
     'iterations': 20
 }
 
-dir1 = 'experiments/' + config['experiment_setting']
+dir1 = os.path.join('experiments', config['experiment_setting'], config['dataset_dir'], config['model'])
+
 for dir in os.listdir(dir1):
-    if dir.isdigit():
+    if dir.isdigit() :
         print('Running directory', dir)
 
         root_dir = os.path.join(dir1, dir)
@@ -139,13 +143,14 @@ for dir in os.listdir(dir1):
 
         # load dataset
         print('Loading test data...')
-        ds = data_loaders.clevr_change(utils.transform_config2)
+        ds = data_loaders.clevr_change(os.path.join(config['experiment_setting'], config['dataset_dir']), config['T'],
+                                       utils.transform_config2)
         eta_hats = [] # save predicted change points
         etas = []
 
         # iterate over test samples
         # range must be within 2800
-        all_i = [400*(i-1)+j for i in range(1,7) for j in range(5)]
+        all_i = [config['T']*10*(i-1)+j for i in range(1,7) for j in range(5)]
         counter = 0
         print('Running time series test samples...')
         for i in all_i:
