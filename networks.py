@@ -22,9 +22,9 @@ class CReLU(nn.Module):
         return torchfunc.relu(x)
 
 
-class convVAE(nn.Module):
+class convMLVAE(nn.Module):
     def __init__(self, fc_hidden1=1024, fc_hidden2=768, CNN_embed_dim=100):
-        super(convVAE, self).__init__()
+        super(convMLVAE, self).__init__()
 
         self.fc_hidden1, self.fc_hidden2, self.CNN_embed_dim = fc_hidden1, fc_hidden2, CNN_embed_dim
 
@@ -138,9 +138,9 @@ class convVAE(nn.Module):
 
 
 
-class DFCVAE(nn.Module):
+class dfcMLVAE(nn.Module):
     def __init__(self, z_dim=128, hidden_dims = None, alpha=1.0, beta=0.5):
-        super(DFCVAE, self).__init__()
+        super(dfcMLVAE, self).__init__()
         self.z_dim = z_dim
         self.alpha = alpha
         self.beta = beta

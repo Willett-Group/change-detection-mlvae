@@ -1,5 +1,6 @@
 import random
 import os
+import os.path as path
 import numpy as np
 from PIL import Image
 import pickle
@@ -23,11 +24,10 @@ dataset_dir = '/home/renyi/Documents/datasets/'
 # each woman sample is randomly selected from the set of all woman samples in celeba
 # label is the group number. there are 2n groups in total.
 class celeba_gender_change(Dataset):
-    def __init__(self, n, T, train=True, seed=7):
+    def __init__(self, n, T, train=True, seed=7, transform=utils.trans_config1):
         random.seed(seed)
         split = 'train' if train else 'test'
-        self.celeba = datasets.CelebA(root=dataset_dir, download=True, split=split,
-                                        transform=utils.transform_config2)
+        self.celeba = datasets.CelebA(root=dataset_dir, download=True, split=split, transform=transform)
         self.n = n
         self.T = T
         self.data_dim = self.celeba[0][0].size()
@@ -37,20 +37,11 @@ class celeba_gender_change(Dataset):
         self.men_indices = []
         self.women_indices = []
 
-        pickle_file_path = 'experiments/celeba_gender/indices.pkl'
-        if path.exists(pickle_file_path):
-            with open(pickle_file_path, 'rb') as f:
-                self.men_indices = pickle.load(f)
-                self.women_indices = pickle.load(f)
-        else:
-            for i in range(len(self.celeba)):
-                if self.celeba[i][1][20] == 1:
-                    self.men_indices.append(i)
-                else:
-                    self.women_indices.append(i)
-            with open(pickle_file_path, 'wb') as f:
-                pickle.dump(self.men_indices, f)
-                pickle.dump(self.women_indices, f)
+        for i in range(len(self.celeba)):
+            if self.celeba[i][1][20] == 1:
+                self.men_indices.append(i)
+            else:
+                self.women_indices.append(i)
 
     def __len__(self):
         return self.n*self.T
