@@ -14,7 +14,7 @@ import utils
 
 
 # directory where all datasets are saved
-dataset_dir = '/home/renyi/Documents/datasets/'
+dataset_dir = '../datasets/'
 
 #################################################################################
 # data loaders for CelebA-based time series
