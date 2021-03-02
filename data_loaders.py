@@ -38,7 +38,7 @@ class celeba_gender_change(Dataset):
         self.women_indices = []
 
         pickle_file_path = 'experiments/celeba_gender/indices.pkl'
-        if os.path.exists(pickle_file_path):
+        if path.exists(pickle_file_path):
             with open(pickle_file_path, 'rb') as f:
                 self.men_indices = pickle.load(f)
                 self.women_indices = pickle.load(f)
@@ -233,10 +233,9 @@ class mnist_loader_repetitive(mnist_loader):
 
 
 class cifar10_loader(Dataset):
-    def __init__(self, n, T, train=True, seed=7):
+    def __init__(self, n, T, train=True, seed=7, transform=utils.trans_config):
         random.seed(seed)
-        self.cifar = datasets.CIFAR10(root=dataset_dir, download=True, train=train,
-                                    transform=utils.transform_config2)
+        self.cifar = datasets.CIFAR10(root=dataset_dir, download=True, train=train, transform=transform)
         self.n = n
         self.T = T
         self.data_dim = self.cifar[0][0].size()
@@ -347,8 +346,8 @@ class cifar10_loader_repetitive(Dataset):
 
 class clevr_change(Dataset):
     def __init__(self, name, T, transform_configuration):
-        self.dir1 = os.path.join(dataset_dir, name, 'nsc_images/')
-        self.dir2 = os.path.join(dataset_dir, name, 'sc_images/')
+        self.dir1 = path.join(dataset_dir, name, 'nsc_images/')
+        self.dir2 = path.join(dataset_dir, name, 'sc_images/')
         self.transform = transform_configuration
 
         all_filenames = os.listdir(self.dir1)
@@ -374,11 +373,11 @@ class clevr_change(Dataset):
 
         if t < self.cps[i]:
             label = 2*i
-            file_name = os.path.join(self.dir1, 'CLEVR_nonsemantic_'+str(i).zfill(6)+'_'+str(t)+'.png')
+            file_name = path.join(self.dir1, 'CLEVR_nonsemantic_'+str(i).zfill(6)+'_'+str(t)+'.png')
             img = Image.open(file_name).convert('RGB')
         else:
             label = 2*i+1
-            file_name = os.path.join(self.dir2, 'CLEVR_semantic_'+str(i).zfill(6)+'_'+str(t-self.cps[i])+'.png')
+            file_name = path.join(self.dir2, 'CLEVR_semantic_'+str(i).zfill(6)+'_'+str(t-self.cps[i])+'.png')
             img = Image.open(file_name).convert('RGB')
 
         return self.transform(img), label

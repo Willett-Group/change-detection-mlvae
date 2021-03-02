@@ -19,6 +19,7 @@ import data_loaders
 import networks
 import utils
 
+
 def train():
     print('\nRunning beta1 = {} beta2 = {}'.format(beta1, beta2))
 
@@ -26,12 +27,12 @@ def train():
     numbered_dirs = [int(f) for f in os.listdir(dir2) if f.isdigit()]
     new_dir = '1' if not numbered_dirs else str(max(numbered_dirs) + 1)
 
-    root_dir = os.path.join(dir2, new_dir)
-    if not os.path.exists(root_dir):
+    root_dir = path.join(dir2, new_dir)
+    if not path.exists(root_dir):
         os.makedirs(root_dir)
 
     # save configuration information
-    with open(os.path.join(root_dir, 'config.txt'), 'w') as f:
+    with open(path.join(root_dir, 'config.txt'), 'w') as f:
         for key in config:
             f.write(key + ': ' + str(config[key]) + '\n')
         f.write('beta1' + ': ' + str(beta1) + '\n')
@@ -43,7 +44,7 @@ def train():
 
     # load data set and create data loader instance
     print('Loading training data...')
-    ds = data_loaders.clevr_change(os.path.join(config['experiment_setting'], config['dataset_dir']), config['T'],
+    ds = data_loaders.clevr_change(path.join(config['experiment_setting'], config['dataset_dir']), config['T'],
                                    utils.transform_config2)
     # should not shuffle here
     train_loader = DataLoader(ds, batch_size=config['b_size'], shuffle=False, drop_last=False)
@@ -59,7 +60,7 @@ def train():
 
     # load saved models if load_saved flag is true
     if config['load_saved']:
-        model.load_state_dict(torch.load(os.path.join(root_dir, 'model')))
+        model.load_state_dict(torch.load(path.join(root_dir, 'model')))
 
     # optimizer definition
     optimizer = optim.Adam(
@@ -69,7 +70,7 @@ def train():
 
     # load_saved is false when training is started from 0th iteration
     if not config['load_saved']:
-        with open(os.path.join(root_dir, config['log_file']), 'w') as log:
+        with open(path.join(root_dir, config['log_file']), 'w') as log:
             log.write('Epoch\tIteration\tReconstruction_loss\tStyle_KL\tContent_KL\n')
     # initialize summary writer
     writer = SummaryWriter()
@@ -140,7 +141,7 @@ def train():
             iteration += 1
 
             # write to log
-            with open(os.path.join(root_dir, config['log_file']), 'a') as log:
+            with open(path.join(root_dir, config['log_file']), 'a') as log:
                 log.write('{0}\t{1}\t{2}\t{3}\t{4}\n'.format(
                     epoch,
                     iteration,
@@ -164,7 +165,7 @@ def train():
         print('\nTotal loss: ' + str(total_loss.item()))
 
         # save checkpoints after at every epoch
-        torch.save(model.state_dict(), os.path.join(root_dir, 'model'))
+        torch.save(model.state_dict(), path.join(root_dir, 'model'))
 
 
 
@@ -196,18 +197,18 @@ config = {
 #########################################################################################
 # create necessary directories
 dir0 = 'experiments'
-dir1 = os.path.join(dir0, config['experiment_setting'], config['dataset_dir']);
-dir2 = os.path.join(dir1, config['model'])
+dir1 = path.join(dir0, config['experiment_setting'], config['dataset_dir']);
+dir2 = path.join(dir1, config['model'])
 for d in [dir0, dir1, dir2]:
-    if not os.path.exists(d):
+    if not path.exists(d):
         os.makedirs(d)
 
 # delete directories that don't have saved models
 '''
 for d in os.listdir(dir2):
-    what = str(os.path.join(dir, d, 'model'))
-    if d.isdigit() and not os.path.exists(what):
-        shutil.rmtree(os.path.join(dir, d, 'model'))
+    what = str(path.join(dir, d, 'model'))
+    if d.isdigit() and not path.exists(what):
+        shutil.rmtree(path.join(dir, d, 'model'))
 '''
 
 

@@ -40,12 +40,12 @@ config = {
 
 ################################################################################
 # create necessary directories
-if not os.path.exists('experiments/'):
+if not path.exists('experiments/'):
     os.makedirs('experiments')
 root_dir = 'experiments/' + config['experiment_name']
-if not os.path.exists(root_dir):
+if not path.exists(root_dir):
     os.makedirs(root_dir)
-with open(os.path.join(root_dir, 'config.txt'), 'w') as f:
+with open(path.join(root_dir, 'config.txt'), 'w') as f:
     for key in config:
         f.write(key + ': ' + str(config[key]) + '\n')
 
@@ -74,9 +74,9 @@ model.to(device=device)
 # load saved models if loading from previously saved model parameters
 # initialize log file if not loading from previously saved model parameters
 if config['load_saved']:
-    model.load_state_dict(torch.load(os.path.join(root_dir, 'model')))
+    model.load_state_dict(torch.load(path.join(root_dir, 'model')))
 else:
-    with open(os.path.join(root_dir, config['log_file']), 'w') as log:
+    with open(path.join(root_dir, config['log_file']), 'w') as log:
         log.write('Epoch\tIteration\tReconstruction_loss\tStyle_KL\tContent_KL\n')
 # initialize summary writer
 writer = SummaryWriter()
@@ -158,7 +158,7 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
         iteration += 1
 
         # write to log
-        with open(os.path.join(root_dir, config['log_file']), 'a') as log:
+        with open(path.join(root_dir, config['log_file']), 'a') as log:
             log.write('{0}\t{1}\t{2}\t{3}\t{4}\n'.format(
                 epoch,
                 iteration,
@@ -182,4 +182,4 @@ for epoch in range(config['start_epoch'], config['end_epoch']):
     print('\nTotal loss: ' + str(total_loss.item()))
 
     # save checkpoints after at every epoch
-    torch.save(model.state_dict(), os.path.join(root_dir, 'model'))
+    torch.save(model.state_dict(), path.join(root_dir, 'model'))

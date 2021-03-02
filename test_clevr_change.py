@@ -114,18 +114,18 @@ config = {
     'iterations': 20
 }
 
-dir1 = os.path.join('experiments', config['experiment_setting'], config['dataset_dir'], config['model'])
+dir1 = path.join('experiments', config['experiment_setting'], config['dataset_dir'], config['model'])
 
 for dir in os.listdir(dir1):
     if dir.isdigit() :
         print('Running directory', dir)
 
-        root_dir = os.path.join(dir1, dir)
+        root_dir = path.join(dir1, dir)
         recon = root_dir + '/reconstructions/'
         sqerrors = root_dir + '/sqerrors/'
 
         for dir in [recon, sqerrors]:
-            if not os.path.exists(dir):
+            if not path.exists(dir):
                 os.makedirs(dir)
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -138,12 +138,12 @@ for dir in os.listdir(dir1):
         elif config['model'] == 'linearvae':
             model = networks.linearVAE2(config['dim_s'], config['dim_c'])
         # load saved parameters of model
-        model.load_state_dict(torch.load(os.path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
+        model.load_state_dict(torch.load(path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
         model = model.to(device=device)
 
         # load dataset
         print('Loading test data...')
-        ds = data_loaders.clevr_change(os.path.join(config['experiment_setting'], config['dataset_dir']), config['T'],
+        ds = data_loaders.clevr_change(path.join(config['experiment_setting'], config['dataset_dir']), config['T'],
                                        utils.transform_config2)
         eta_hats = [] # save predicted change points
         etas = []

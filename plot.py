@@ -31,7 +31,7 @@ diffs, means, stds, lower, median, upper = {},{},{},{},{},{}
 
 for dir in os.listdir(root_dir):
     if dir.isdigit():
-        with open(os.path.join(root_dir, dir, 'config.txt'), 'r') as f1:
+        with open(path.join(root_dir, dir, 'config.txt'), 'r') as f1:
             l1, l2 = f1.read().splitlines()[-2:]
             b1 = l1.split(' ')[-1]
             b2 = l2.split(' ')[-1]
@@ -39,7 +39,7 @@ for dir in os.listdir(root_dir):
             beta2.add(b2)
             key = b1 + ';' + b2
 
-        with open(os.path.join(root_dir, dir, 'cps.txt'), 'r') as f2:
+        with open(path.join(root_dir, dir, 'cps.txt'), 'r') as f2:
             cps_hat = f2.readline().split(' ')[0:-1]
             cps_hat = np.array([int(i) for i in cps_hat])
             cps = f2.readline().split(' ')[0:-1]

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from collections import OrderedDict
 
 from itertools import cycle
@@ -10,7 +11,6 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as torchfunc
 
 import utils
-from utils import transform_config, reparameterize
 
 # implements the concatenated relu activation function
 class CReLU(nn.Module):
@@ -380,90 +380,80 @@ class z_classifier(nn.Module):
         return x
 
 
-
-
-
 class linearVAE(nn.Module):
-    def __init__(self, style_dim, class_dim):
+    def __init__(self, input_dim, l1_dim, z_dim):
         super(linearVAE, self).__init__()
+        self.input_dim = input_dim
+        flat_dim = int(np.prod(input_dim))
 
-        self.linear = nn.Sequential(
-            nn.Linear(in_features=784, out_features=500, bias=True),
-            nn.Tanh()
+        self.linear1 = nn.Sequential(
+            nn.Linear(in_features=flat_dim, out_features=l1_dim, bias=True),
+            nn.ReLU()
         )
 
-        # style
-        self.style_mu = nn.Linear(500, style_dim, bias=True)
-        self.style_logvar = nn.Linear(500, style_dim, bias=True)
-
-        # class
-        self.class_mu = nn.Linear(500, class_dim, bias=True)
-        self.class_logvar = nn.Linear(500, class_dim, bias=True)
+        self.mu = nn.Linear(l1_dim, z_dim, bias=True)
+        self.log_var = nn.Linear(l1_dim, z_dim, bias=True)
 
         self.linear2 = nn.Sequential(
-            nn.Linear(style_dim + class_dim, 500, bias=True),
-            nn.Tanh(),
-            nn.Linear(500, 784, bias=True),
-            nn.Sigmoid()
-        )
-
-    def encode(self, x):
-        x = self.linear(x)
-
-        style_z_mu = self.style_mu(x)
-        style_z_logvar = self.style_logvar(x)
-
-        class_z_mu = self.class_mu(x)
-        class_z_logvar = self.class_logvar(x)
-
-        return style_z_mu, style_z_logvar, class_z_mu, class_z_logvar
-    
-    def decode(self, style_z, class_z):
-        x = torch.cat((style_z, class_z), dim=1)
-        x = self.linear2(x)
-
-        return x
-
-# linear vae for 64 by 64 by 3
-class linearVAE2(nn.Module):
-    def __init__(self, style_dim, class_dim):
-        super(linearVAE2, self).__init__()
-
-        self.linear = nn.Sequential(
-            nn.Linear(in_features=12288, out_features=5000, bias=True),
-            nn.Tanh()
-        )
-
-        # style
-        self.style_mu = nn.Linear(5000, style_dim, bias=True)
-        self.style_logvar = nn.Linear(5000, style_dim, bias=True)
-
-        # class
-        self.class_mu = nn.Linear(5000, class_dim, bias=True)
-        self.class_logvar = nn.Linear(5000, class_dim, bias=True)
-
-        self.linear2 = nn.Sequential(
-            nn.Linear(style_dim + class_dim, 5000, bias=True),
-            nn.Tanh(),
-            nn.Linear(5000, 12288, bias=True),
+            nn.Linear(z_dim, l1_dim, bias=True),
+            nn.ReLU(),
+            nn.Linear(l1_dim, flat_dim, bias=True),
             nn.Sigmoid()
         )
 
     def encode(self, x):
         x = torch.flatten(x, start_dim=1)
-        x = self.linear(x)
+        x = self.linear1(x)
+        mu = self.mu(x)
+        logvar = self.log_var(x)
 
-        style_z_mu = self.style_mu(x)
-        style_z_logvar = self.style_logvar(x)
+        return mu, logvar
 
-        class_z_mu = self.class_mu(x)
-        class_z_logvar = self.class_logvar(x)
+    def decode(self, z):
+        x = self.linear2(z)
+        x = x.view((-1,) + self.input_dim)
+        return x
 
-        return style_z_mu, style_z_logvar, class_z_mu, class_z_logvar
+
+class linearMLVAE(nn.Module):
+    def __init__(self, input_dim, l1_dim, cs_dim):
+        super(linearMLVAE, self).__init__()
+        self.input_dim = input_dim # a tuple of the dimension of the input
+        flat_dim = np.prod(input_dim)
+
+        self.linear1 = nn.Sequential(
+            nn.Linear(in_features=flat_dim, out_features=l1_dim, bias=True),
+            nn.ReLU()
+        )
+
+        # style
+        self.s_mu = nn.Linear(l1_dim, cs_dim, bias=True)
+        self.s_logvar = nn.Linear(l1_dim, cs_dim, bias=True)
+        # content
+        self.c_mu = nn.Linear(l1_dim, cs_dim, bias=True)
+        self.c_logvar = nn.Linear(l1_dim, cs_dim, bias=True)
+
+        self.linear2 = nn.Sequential(
+            nn.Linear(2*cs_dim, l1_dim, bias=True),
+            nn.ReLU(),
+            nn.Linear(l1_dim, flat_dim, bias=True),
+            nn.Sigmoid()
+        )
+
+    def encode(self, x):
+        x = torch.flatten(x, start_dim=1)
+        x = self.linear1(x)
+        # style
+        s_mu = self.s_mu(x)
+        s_logvar = self.s_logvar(x)
+        # content
+        c_mu = self.c_mu(x)
+        c_logvar = self.c_logvar(x)
+
+        return s_mu, s_logvar, c_mu, c_logvar
     
-    def decode(self, style_z, class_z):
-        x = torch.cat((style_z, class_z), dim=1)
-        x = self.linear2(x)
-        x = x.view(-1, 3, 64, 64)
-
+    def decode(self, s, c):
+        z = torch.cat((s, c), dim=1)
+        x = self.linear2(z)
+        x = x.view((-1,) + self.input_dim)
         return x

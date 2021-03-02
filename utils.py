@@ -9,25 +9,27 @@ from torch.utils.data.sampler import SubsetRandomSampler
 import numpy as np
 
 # compose a transform configuration
-transform_config = transforms.Compose([
+trans_config = transforms.Compose([
+    transforms.ToTensor()
+])
+
+trans_config1 = transforms.Compose([
+    transforms.Resize([64, 64]),
+    transforms.ToTensor()
+])
+
+trans_config2 = transforms.Compose([
     transforms.Resize([224, 224]),
     transforms.ToTensor()
 ])
 
-transform_config1 = transforms.Compose([
+trans_config2_norm = transforms.Compose([
     transforms.Resize([224, 224]),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-transform_config2 = transforms.Compose([
-    transforms.Resize([64, 64]),
-    transforms.ToTensor()
-])
 
-transform_config3 = transforms.Compose([
-    transforms.ToTensor()
-])
 
 transform_rgb = transforms.Lambda(lambda image: image.convert('RGB'))
 transform_flatten = transforms.Lambda(lambda image: torch.flatten(image))
@@ -118,16 +120,13 @@ def normal_density(eps):
     # eps is a 1 by 1 tensor
     return 1
 
-def reparameterize(training, mu, logvar):
-    if training:
-        std = logvar.mul(0.5).exp_()
-        eps = Variable(std.data.new(std.size()).normal_())
-        return eps.mul(std).add_(mu)
-    else:
-        return mu
+def reparameterize(mu, logvar):
+    std = logvar.mul(0.5).exp_()
+    eps = Variable(std.data.new(std.size()).normal_())
+    return eps.mul(std).add_(mu)
 
 
-def group_wise_reparameterize(training, mu, logvar, labels_batch, cuda):
+def group_wise_reparameterize(mu, logvar, labels_batch, cuda):
     eps_dict = {}
 
     # generate only 1 eps value per group label
@@ -137,18 +136,15 @@ def group_wise_reparameterize(training, mu, logvar, labels_batch, cuda):
         else:
             eps_dict[label.item()] = torch.FloatTensor(1, logvar.size(1)).normal_(0., 0.1)
 
-    if training:
-        std = logvar.mul(0.5).exp_()
-        reparameterized_var = Variable(std.data.new(std.size()))
+    std = logvar.mul(0.5).exp_()
+    reparameterized_var = Variable(std.data.new(std.size()))
 
-        # multiply std by correct eps and add mu
-        for i in range(logvar.size(0)):
-            reparameterized_var[i] = std[i].mul(Variable(eps_dict[labels_batch[i].item()]))
-            reparameterized_var[i].add_(mu[i])
+    # multiply std by correct eps and add mu
+    for i in range(logvar.size(0)):
+        reparameterized_var[i] = std[i].mul(Variable(eps_dict[labels_batch[i].item()]))
+        reparameterized_var[i].add_(mu[i])
 
-        return reparameterized_var
-    else:
-        return mu
+    return reparameterized_var
 
 
 def weights_init(layer):

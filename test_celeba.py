@@ -114,12 +114,12 @@ dir1 = 'experiments/' + config['experiment_setting']
 for dir in os.listdir(dir1):
     print('Running directory', dir)
     if dir.isdigit() and int(dir) in [6]:
-        root_dir = os.path.join(dir1, dir)
+        root_dir = path.join(dir1, dir)
         recon = root_dir + '/reconstructions/'
         sqerrors = root_dir + '/sqerrors/'
 
         for dir in [recon, sqerrors]:
-            if not os.path.exists(dir):
+            if not path.exists(dir):
                 os.makedirs(dir)
 
         # use gpu or cpu
@@ -133,7 +133,7 @@ for dir in os.listdir(dir1):
         elif config['model'] == 'linearvae':
             model = networks.linearVAE2(500, 500)
         # load saved parameters of model
-        model.load_state_dict(torch.load(os.path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
+        model.load_state_dict(torch.load(path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
         model = model.to(device=device)
 
         # load dataset

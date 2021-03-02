@@ -82,15 +82,15 @@ def generatewrapper(T, var):
 if __name__ == "__main__":
     root_dir = os.getcwd()
 
-    dirs = [os.path.join(root_dir, 'data/')]
+    dirs = [path.join(root_dir, 'data/')]
     for dir in dirs:
-        if not os.path.isdir(dir):
+        if not path.isdir(dir):
             os.mkdir(dir)
 
     datasets_dict = generatewrapper(50, 0.2)
     for dsname in datasets_dict:
         # save training and test data to pickle
-        with open(os.path.join(dirs[0], dsname), 'wb') as f:
+        with open(path.join(dirs[0], dsname), 'wb') as f:
             pickle.dump(datasets_dict[dsname], f)
         # save only test data to csv files for R
         if FLAGS.save_csv:

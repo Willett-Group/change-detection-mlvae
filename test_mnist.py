@@ -83,7 +83,7 @@ recon = root_dir + '/reconstructions/'
 sqerrors = root_dir + '/sqerrors/'
 
 for dir in [recon, sqerrors]:
-    if not os.path.exists(dir):
+    if not path.exists(dir):
         os.makedirs(dir)
 
 # use gpu or cpu
@@ -97,7 +97,7 @@ elif config['model'] == 'dfcvae':
 elif config['model'] == 'convvae':
     model = networks.convVAE()
 # load saved parameters of model
-model.load_state_dict(torch.load(os.path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
+model.load_state_dict(torch.load(path.join(root_dir, 'model'), map_location=lambda storage, loc: storage))
 model = model.to(device=device)
 
 # load dataset
