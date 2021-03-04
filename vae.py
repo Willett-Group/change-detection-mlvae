@@ -31,7 +31,7 @@ parser.add_argument('--start_epoch', type=int, default=0)
 parser.add_argument('--end_epoch', type=int)
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--initial_lr', type=float, default=0.001)
-parser.add_argument('--beta1', default=1)
+parser.add_argument('--beta1', type=float, default=1.0)
 
 parser.add_argument('--log_file', default='log.txt')
 parser.add_argument('--continue_saved', default=False)
@@ -138,7 +138,7 @@ def main():
                 the decoder consider content latent embeddings as random noise and ignore them 
                 """
                 # reconstruction error
-                z = utils.reparameterize(training=True, mu=mu, logvar=logvar)
+                z = utils.reparameterize(mu=mu, logvar=logvar)
                 reconstruction = model.decode(z)
                 reconstruction_error = utils.mse_loss(reconstruction, X)
                 # feature loss in dfcvae
@@ -149,7 +149,7 @@ def main():
                     for (r, i) in zip(reconstruction_features, input_features):
                         feature_loss += utils.mse_loss(r, i)
                 # total_loss and backpropagate
-                loss = (reconstruction_error + feature_loss) + int(args.beta1) * kl
+                loss = (reconstruction_error + feature_loss) + args.beta1 * kl
                 loss.backward()
                 # update optimizer
                 optimizer.step()
@@ -220,7 +220,7 @@ def main():
                 X = ds.get_time_series_sample(i)
                 X = X.to(device=device)
                 mu, logvar = model.encode(X)
-                z = utils.reparameterize(training=False, mu=mu, logvar=logvar)
+                z = utils.reparameterize(mu=mu, logvar=logvar)
                 reconstruction = model.decode(z)
 
                 grid = make_grid(torch.cat([X,

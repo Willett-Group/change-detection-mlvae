@@ -128,15 +128,9 @@ class celeba_change_person(Dataset):
 ####################################################################################
 # Data loaders related to MNSIT-based time series datasets
 class mnist_loader(Dataset):
-    def __init__(self, n, T, cp_way=3, train=True, seed=7, model='linearvae'):
-        if model == 'linearvae':
-            transform = utils.transform_config5
-        else:
-            transform = utils.transform_config4
-        
+    def __init__(self, n, T, cp_way=3, train=True, seed=7, transform=utils.trans_config):
         random.seed(seed)
-        self.mnist = datasets.MNIST(root=dataset_dir, download=True, train=train,
-                                    transform=transform)
+        self.mnist = datasets.MNIST(root=dataset_dir, download=True, train=train, transform=transform)
         self.n = n
         self.T = T
         self.data_dim = self.mnist[0][0].size()
