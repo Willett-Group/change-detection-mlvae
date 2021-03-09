@@ -12,7 +12,7 @@ from tensorboardX import SummaryWriter
 from torchvision.utils import save_image
 from torchvision.utils import make_grid
 
-import data_loaders
+import dataloaders
 import networks
 import utils
 
@@ -34,6 +34,7 @@ parser.add_argument('--start_epoch', type=int, default=0)
 parser.add_argument('--end_epoch', type=int)
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--initial_lr', type=float, default=0.001)
+parser.add_argument('--beta', type=float, default=1)
 parser.add_argument('--beta1', type=float, default=1)
 parser.add_argument('--beta2', type=float, default=1)
 
@@ -132,17 +133,17 @@ def get_reconstructions_fixed_style(X, eta, T, i, j, model):
 def main():
     print('Initializing training and testing datasets...')
     if args.dataset == 'mnist':
-        ds = data_loaders.mnist_loader(args.T, args.T, train=True, seed=7, transform=utils.trans_config)
-        ds_test = data_loaders.mnist_loader(200, args.T, train=False, seed=7, transform=utils.trans_config)
+        ds = dataloaders.mnist_loader(args.T, args.T, train=True, seed=7, transform=utils.trans_config)
+        ds_test = dataloaders.mnist_loader(100, args.T, train=False, seed=7, transform=utils.trans_config)
     elif args.dataset == 'cifar10':
-        ds = data_loaders.cifar10_loader(args.N, args.T, train=True, seed=7, transform=utils.trans_config)
-        ds_test = data_loaders.cifar10_loader(200, args.T, train=False, seed=7, transform=utils.trans_config)
+        ds = dataloaders.cifar10_loader(args.N, args.T, train=True, seed=7, transform=utils.trans_config)
+        ds_test = dataloaders.cifar10_loader(100, args.T, train=False, seed=7, transform=utils.trans_config)
     elif args.dataset == 'celeba':
-        ds = data_loaders.celeba_gender_change(args.N, args.T, train=True, seed=7, transform=utils.trans_config1)
-        ds_test = data_loaders.celeba_gender_change(200, args.T, train=False, seed=7, transform=utils.trans_config1)
-    elif args.dataset == 'clevr_change':
-        ds = data_loaders.clevr_change(args.dataset, args.T, utils.transform_config2)
-        ds_test = data_loaders.clevr_change(args.dataset, args.T, utils.trans_config2)
+        ds = dataloaders.celeba_gender_change(args.N, args.T, train=True, seed=7, transform=utils.trans_config1)
+        ds_test = dataloaders.celeba_gender_change(100, args.T, train=False, seed=7, transform=utils.trans_config1)
+    elif args.dataset == 'clevr':
+        ds = dataloaders.clevr_change('n=2100T=50', args.T, utils.trans_config1_special)
+        ds_test = dataloaders.clevr_change('n=2100T=50', args.T, utils.trans_config1_special)
     else:
         raise Exception("invalid dataset name")
 
@@ -250,8 +251,7 @@ def main():
                     feature_loss += utils.mse_loss(r, i)
 
             loss = reconstruction_error + feature_loss + \
-                   float(args.beta1) * style_kl + \
-                   float(args.beta2) * content_kl
+                   float(args.beta) * (style_kl + content_kl)
             loss.backward()
             # update optimizer
             optimizer.step()
@@ -284,7 +284,7 @@ def main():
         # save the model at every epoch
         torch.save(model.state_dict(), path.join(root_dir, 'model_cur'))
 
-        if epoch % 5 == 0:
+        if epoch % 20 == 0:
             # run validations
             print('\nRunning tests at epoch{}'.format(epoch))
             recon_dir = path.join(root_dir, 'images_epoch{}'.format(epoch))
@@ -296,9 +296,15 @@ def main():
 
             # start testing
             eta_hats = []  # save predicted change points
+            etas = []
 
             # iterate over test samples X_1, X_2, etc...
-            for i in range(ds_test.n):
+            if args.dataset == 'clevr':
+                all_i = [args.T*6*(i-1)+j for i in range(1,7) for j in range(5)]
+            else:
+                all_i = range(ds_test.n)
+            for i in all_i:
+                etas.append(ds_test.cps[i])
                 # load the test sample X_i
                 X = ds_test.get_time_series_sample(i)
                 X = X.to(device=device)
@@ -340,7 +346,7 @@ def main():
                 plt.close()
 
             # compute mean of |eta-eta_hat| among all test samples
-            diff = np.abs(np.asarray(ds_test.cps) - np.asarray(eta_hats))
+            diff = np.abs(np.asarray(etas) - np.asarray(eta_hats))
             error = np.mean(diff)
             # keep track of the errors associated with epochs
             epoch_error[epoch] = error
@@ -355,7 +361,7 @@ def main():
                     for tmp in eta_hats:
                         cps_r.write('{} '.format(tmp))
                     cps_r.write('\n')
-                    for tmp in ds_test.cps:
+                    for tmp in etas:
                         cps_r.write('{} '.format(tmp))
 
 

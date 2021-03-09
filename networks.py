@@ -1,16 +1,10 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from collections import OrderedDict
 
-from itertools import cycle
 from torchvision import datasets
 import torchvision.models as models
-from torch.autograd import Variable
-from torch.utils.data import DataLoader
 import torch.nn.functional as torchfunc
-
-import utils
 
 # implements the concatenated relu activation function
 class CReLU(nn.Module):

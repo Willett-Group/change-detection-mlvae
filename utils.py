@@ -18,6 +18,11 @@ trans_config1 = transforms.Compose([
     transforms.ToTensor()
 ])
 
+trans_config1_special = transforms.Compose([
+    transforms.Resize([48, 64]),
+    transforms.ToTensor()
+])
+
 trans_config2 = transforms.Compose([
     transforms.Resize([224, 224]),
     transforms.ToTensor()

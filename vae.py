@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 from torchvision.utils import save_image
 from torchvision.utils import make_grid
 
-import data_loaders
+import dataloaders
 import networks
 import utils
 
@@ -71,13 +71,13 @@ def main():
         # load data set and create data loader instance
         print('Loading training data...')
         if args.dataset == 'celeba':
-            ds = data_loaders.celeba_gender_change(args.N, args.T, train=True, seed=7)
+            ds = dataloaders.celeba_gender_change(args.N, args.T, train=True, seed=7)
         elif args.dataset == 'clevr_change':
-            ds = data_loaders.clevr_change(args.dataset, args.T, utils.transform_config2)
+            ds = dataloaders.clevr_change(args.dataset, args.T, utils.transform_config2)
         elif args.dataset == 'cifar10':
-            ds = data_loaders.cifar10_loader(args.N, args.T, train=True, seed=7, transform=utils.trans_config)
+            ds = dataloaders.cifar10_loader(args.N, args.T, train=True, seed=7, transform=utils.trans_config)
         elif args.dataset == 'mnist':
-            ds = data_loaders.mnist_loader(args.T, args.T, train=True, seed=7)
+            ds = dataloaders.mnist_loader(args.T, args.T, train=True, seed=7)
         else:
             raise Exception("invalid dataset name")
         # should not shuffle here
@@ -192,13 +192,13 @@ def main():
 
             print('Loading test data...')
             if args.dataset == 'celeba':
-                ds = data_loaders.celeba_gender_change(30, args.T, train=False, seed=7)
+                ds = dataloaders.celeba_gender_change(30, args.T, train=False, seed=7)
             elif args.dataset == 'clevr_change':
-                ds = data_loaders.clevr_change(args.dataset, args.T, utils.trans_config2)
+                ds = dataloaders.clevr_change(args.dataset, args.T, utils.trans_config2)
             elif args.dataset == 'cifar10':
-                ds = data_loaders.cifar10_loader(30, args.T, train=False, seed=7)
+                ds = dataloaders.cifar10_loader(30, args.T, train=False, seed=7)
             elif args.dataset == 'mnist':
-                ds = data_loaders.mnist_loader(30, args.T, train=False, seed=7)
+                ds = dataloaders.mnist_loader(30, args.T, train=False, seed=7)
             else:
                 raise Exception("invalid dataset name")
 

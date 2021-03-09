@@ -1,10 +1,6 @@
 #!/bin/bash
 
-for b1 in 0.1 1 10 100
+for b in 0.00001 0.001 0.1 1 10 100
 do
-  for b2 in 0.1 1 10 100
-  if [$b1 == $b2]; then
-    do
-      python mlvae.py --dataset cifar10 --model linearmlvae --cs_dim 50 --end_epoch 200 --beta1 $b1 --beta2 $b2 --log_file 'log.txt'
-    done
+  python mlvae.py --dataset celeba --model linearmlvae --cs_dim 50 --end_epoch 50 --beta $b --log_file 'log.txt'
 done
