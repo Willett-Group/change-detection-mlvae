@@ -1,6 +1,19 @@
 #!/bin/bash
 
-for b in 0.00001 0.001 0.1 1 10 100
+for b in 1
 do
-  python mlvae.py --dataset celeba --model linearmlvae --cs_dim 50 --end_epoch 50 --beta $b --log_file 'log.txt'
+  python mlvae.py --dataset celeba --model linearmlvae --cs_dim 50 --end_epoch 50 --beta $b \
+  --val_period 100 --log_file 'log.txt'
+done
+
+for b in 1
+do
+  python mlvae.py --dataset clevr --model linearmlvae --cs_dim 50 --end_epoch 50 --beta $b \
+  --val_period 100 --log_file 'log.txt'
+done
+
+for b in 1
+do
+  python mlvae.py --dataset cifar10 --model linearmlvae --cs_dim 50 --end_epoch 50 --beta $b \
+  --val_period 100 --log_file 'log.txt'
 done
