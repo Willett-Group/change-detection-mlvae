@@ -1,0 +1,1 @@
+python originals.py --dataset clevr
