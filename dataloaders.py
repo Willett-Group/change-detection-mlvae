@@ -11,18 +11,17 @@ from torch.utils.data import Dataset
 
 import utils
 
-
-
+#################################################################################
 # directory where all datasets are saved
 dataset_dir = '../datasets/'
 
-#################################################################################
-# data loaders for CelebA-based time series
+'''data loaders for CelebA-based time series
+all samples before change points are men, all samples after change point are women
+each man sample is randomly selected from the set of all man samples in celeba
+each woman sample is randomly selected from the set of all woman samples in celeba
+label is the group number. there are 2n groups in total'''
 
-# all samples before change points are men, all samples after change point are women
-# each man sample is randomly selected from the set of all man samples in celeba
-# each woman sample is randomly selected from the set of all woman samples in celeba
-# label is the group number. there are 2n groups in total.
+
 class celeba_gender_change(Dataset):
     def __init__(self, n, T, train=True, seed=7, transform=utils.trans_config1):
         random.seed(seed)
@@ -37,11 +36,24 @@ class celeba_gender_change(Dataset):
         self.men_indices = []
         self.women_indices = []
 
-        for i in range(len(self.celeba)):
-            if self.celeba[i][1][20] == 1:
-                self.men_indices.append(i)
-            else:
-                self.women_indices.append(i)
+        temp_men_save = 'men_I_train.pickle' if train else 'men_I_test.pickle'
+        temp_women_save = 'women_I_train.pickle' if train else 'women_I_test.pickle'
+        if path.exists(path.join(dataset_dir, 'celeba', temp_men_save)):
+            with open(path.join(dataset_dir, 'celeba', temp_men_save), 'rb') as f:
+                self.men_indices = pickle.load(f)
+        if path.exists(path.join(dataset_dir, 'celeba', temp_women_save)):
+            with open(path.join(dataset_dir, 'celeba', temp_women_save), 'rb') as f:
+                self.women_indices = pickle.load(f)
+        if not self.men_indices and not self.women_indices:
+            for i in range(len(self.celeba)):
+                if self.celeba[i][1][20] == 1:
+                    self.men_indices.append(i)
+                else:
+                    self.women_indices.append(i)
+            with open(temp_men_save, 'wb') as f:
+                pickle.dump(self.men_indices, f)
+            with open(temp_women_save, 'wb') as f:
+                pickle.dump(self.women_indices, f)
 
     def __len__(self):
         return self.n*self.T
@@ -63,29 +75,6 @@ class celeba_gender_change(Dataset):
         for t in range(self.T):
             X[t] = self.__getitem__(self.T*n + t)[0]
         return X
-
-# get samples in the same way as in celeba_gender_change,
-# but the label is 1 for man, 0 for woman
-class celeba_classification(celeba_gender_change):
-    def __init__(self, n, T, train=True, seed=7):
-        super().__init__(n, T, train, seed)
-    
-    def __getitem__(self, idx):
-        label = 1 if idx in self.men_indices else 0
-
-        if t < self.cps[row]:
-            sample = self.celeba[random.choice(self.men_indices)][0]
-        else:
-            sample = self.mnist[random.choice(self.women_indices)][0]
-
-        return sample, label
-    
-    def get_time_series_sample(self, n):
-        X = torch.empty(size=(self.T,) + self.data_dim)
-        for t in range(self.T):
-            X[t] = self.__getitem__(self.T*n + t)[0]
-        return X
-
 
 
 # change in person
@@ -133,7 +122,7 @@ class mnist_loader(Dataset):
         self.mnist = datasets.MNIST(root=dataset_dir, download=True, train=train, transform=transform)
         self.n = n
         self.T = T
-        self.data_dim = self.mnist[0][0].size()
+        self.data_dim = (3, 28, 28)
 
         possible_cps = [] # possible change points
         if cp_way == 1: # fixed cp value
@@ -172,10 +161,12 @@ class mnist_loader(Dataset):
 
         if t < self.cps[row]:
             sample = self.mnist[random.choice(indices1)][0]
+            # label = self.mnist[random.choice(indices1)][1]
         else:
             sample = self.mnist[random.choice(indices2)][0]
+            # label = self.mnist[random.choice(indices2)][1]
 
-        return sample, label
+        return torch.cat(3*[sample]), label
 
     def get_time_series_sample(self, n):
         X = torch.empty(size=(self.T,) + self.data_dim)
@@ -213,9 +204,6 @@ class mnist_loader_repetitive(mnist_loader):
 
         return sample, label
     
-
-
-
 
 class cifar10_loader(Dataset):
     def __init__(self, n, T, train=True, seed=7, transform=utils.trans_config):
@@ -326,7 +314,6 @@ class cifar10_loader_repetitive(Dataset):
         for t in range(self.T):
             X[t] = self.__getitem__(self.T*n + t)[0]
         return X
-
 
 
 class clevr_change(Dataset):

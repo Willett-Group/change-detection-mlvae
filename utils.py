@@ -34,8 +34,6 @@ trans_config2_norm = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-
-
 transform_rgb = transforms.Lambda(lambda image: image.convert('RGB'))
 transform_flatten = transforms.Lambda(lambda image: torch.flatten(image))
 
@@ -49,6 +47,7 @@ transform_config5 = transforms.Compose([
     transforms.ToTensor(),
     transform_flatten
 ])
+
 
 def accumulate_group_evidence(class_mu, class_logvar, labels_batch):
     """
@@ -95,7 +94,7 @@ def accumulate_group_evidence(class_mu, class_logvar, labels_batch):
         mu_dict[group_label] *= var_dict[group_label]
 
     # replace individual mu and logvar values for each sample with group mu and logvar
-    group_mu = torch.FloatTensor(class_mu.size(0), class_mu.size(1), )
+    group_mu = torch.FloatTensor(class_mu.size(0), class_mu.size(1))
     group_var = torch.FloatTensor(class_var.size(0), class_var.size(1))
 
     group_mu = group_mu.cuda()
@@ -111,7 +110,7 @@ def accumulate_group_evidence(class_mu, class_logvar, labels_batch):
         group_var[i][group_var[i] == float(0)] = 1e-6
 
     # convert group vars into logvars before returning
-    return Variable(group_mu, requires_grad=True), Variable(torch.log(group_var), requires_grad=True)
+    return Variable(group_mu, requires_grad=True), Variable(torch.log(group_var), requires_grad=True), var_dict, mu_dict
 
 
 def mse_loss(input, target):
@@ -121,17 +120,22 @@ def mse_loss(input, target):
 def l1_loss(input, target):
     return torch.sum(torch.abs(input - target)) / input.data.nelement()
 
+
 def normal_density(eps):
     # eps is a 1 by 1 tensor
     return 1
 
-def reparameterize(mu, logvar):
-    std = logvar.mul(0.5).exp_()
-    eps = Variable(std.data.new(std.size()).normal_())
-    return eps.mul(std).add_(mu)
+
+def reparameterize(mu, logvar, training):
+    if training:
+        std = logvar.mul(0.5).exp_()
+        eps = Variable(std.data.new(std.size()).normal_())
+        return eps.mul(std).add_(mu)
+    else:
+        return mu
 
 
-def group_wise_reparameterize(mu, logvar, labels_batch, cuda):
+def group_wise_reparameterize(mu, logvar, labels_batch, cuda, training):
     eps_dict = {}
 
     # generate only 1 eps value per group label
@@ -141,15 +145,17 @@ def group_wise_reparameterize(mu, logvar, labels_batch, cuda):
         else:
             eps_dict[label.item()] = torch.FloatTensor(1, logvar.size(1)).normal_(0., 0.1)
 
-    std = logvar.mul(0.5).exp_()
-    reparameterized_var = Variable(std.data.new(std.size()))
+    if training:
+        std = logvar.mul(0.5).exp_()
+        reparameterized_var = Variable(std.data.new(std.size()))
+        # multiply std by correct eps and add mu
+        for i in range(logvar.size(0)):
+            reparameterized_var[i] = std[i].mul(Variable(eps_dict[labels_batch[i].item()]))
+            reparameterized_var[i].add_(mu[i])
 
-    # multiply std by correct eps and add mu
-    for i in range(logvar.size(0)):
-        reparameterized_var[i] = std[i].mul(Variable(eps_dict[labels_batch[i].item()]))
-        reparameterized_var[i].add_(mu[i])
-
-    return reparameterized_var
+        return reparameterized_var
+    else:
+        return mu
 
 
 def weights_init(layer):
