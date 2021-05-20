@@ -6,27 +6,23 @@ import json
 import matplotlib.pyplot as plt
 
 import torch
+import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from torchvision.utils import save_image
 from torchvision.utils import make_grid
+import torchvision.transforms as transforms
 
 import dataloaders
 import networks
 import utils
 
 ################################################################################
-# <12L
-# dan a4: cooling limits; ghost s1: overpriced; formd t1; dan a4 h2o: limited cpu cooler
-# clearance; console: no 2.5; conswole; dan c4 sfx;
-
-
 # things that make reconstructions worse (blurry, not able to see outlines...):
 # too large or too small cs_dim
 # too small number of training epochs
 # larger beta values
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str)
 parser.add_argument('--N', type=int, default=1000)
@@ -34,22 +30,51 @@ parser.add_argument('--T', type=int, default=50)
 parser.add_argument('--model', type=str)
 parser.add_argument('--cs_dim', type=int)
 
-parser.add_argument('--start_epoch', type=int, default=0)
-parser.add_argument('--end_epoch', type=int)
+parser.add_argument('--nepochs', type=int)
 parser.add_argument('--batch_size', type=int, default=250)
 parser.add_argument('--initial_lr', type=float, default=0.001)
 parser.add_argument('--beta', type=float, default=1)
-parser.add_argument('--val_period', type=int, default=10)
+parser.add_argument('--test', type=int, default=0)
+parser.add_argument('--test_method', default='graph-cut')
 
 parser.add_argument('--log_file', default='log.txt')
 parser.add_argument('--continue_saved', default=False)
 
 parser.add_argument('--iterations', default=20)
 
+parser.add_argument('--channels', default=3)
+parser.add_argument('--dim_x', default=64)
+parser.add_argument('--dim_y', default=64)
 
-#################################################################################
+args = parser.parse_args()
+img_shape = (args.channels, args.dim_x, args.dim_y)
+################################################################################
 
-def get_recon(X, y, model):
+
+def graph_cut(model, ds, X, eta, only_c = True):
+    s_mu, _, c_mu, _ = model.encode(X)
+
+    E_r = 0
+    E_rc = 0
+    E_r_count = 0
+    E_rc_count = 0
+    for d1 in range(ds.T):
+        for d2 in range(ds.T):
+            if (d1 <= eta and d2 < eta) or (d1 > eta and d2 > eta):
+                E_rc += torch.sum(torch.square(c_mu[d1] - c_mu[d2]))
+                if not only_c:
+                    E_rc += torch.sum(torch.square(s_mu[d1] - s_mu[d2]))
+                E_rc_count += 1
+            else:
+                E_r += torch.sum(torch.square(c_mu[d1] - c_mu[d2]))
+                if not only_c:
+                    E_r += torch.sum(torch.square(s_mu[d1] - s_mu[d2]))
+                E_r_count += 1
+    score = E_r / E_r_count - E_rc / E_rc_count
+
+    return score
+
+def get_recon_plain(X, y, model):
     # style is individual, content is group
     s_mu, s_logvar, c_mu, c_logvar = model.encode(X)
     # put all content stuff into group in the grouping/evidence-accumulation stage
@@ -64,26 +89,7 @@ def get_recon(X, y, model):
     c_z = utils.group_wise_reparameterize(
         mu=group_mu, logvar=group_logvar, labels_batch=y, cuda=True, training=False
     )
-    # recon = model.decode(s_z, c_z)
-    recon = model.decode(torch.zeros(c_z.size()).to(device=device), c_z)
-    recon_error = torch.sum((recon - X).pow(2))
-
-    return recon, recon_error
-
-
-def get_recon_sfixed(X, y, model, style):
-    s_mu, s_logvar, c_mu, c_logvar = model.encode(X)
-    s_mu_g = style.expand(s_mu.size(0), -1)
-    # s_mu_g = s_mu_g.to(device=device)
-    group_mu, group_logvar, _, _ = utils.accumulate_group_evidence(
-        c_mu.data, c_logvar.data, y
-    )
-    s_z = utils.reparameterize(mu=s_mu_g, logvar=s_logvar, training=False)
-    c_z = utils.group_wise_reparameterize(
-        mu=group_mu, logvar=group_logvar, labels_batch=y, cuda=True, training=False
-    )
-    # recon = model.decode(s_z, c_z)
-    recon = model.decode(torch.zeros(c_z.size()).to(device=device), c_z)
+    recon = model.decode(s_z, c_z)
     recon_error = torch.sum((recon - X).pow(2))
 
     return recon, recon_error
@@ -104,20 +110,12 @@ def get_recon_minimize(X, y, model):
         [s_optimize, c_optimize]
     )
 
-    for itr in range(args.iterations):
+    for itr in range(int(args.iterations)):
         optimizer.zero_grad()
 
         # reconstruction loss
         recon = model.decode(s_optimize, c)
         recon_error = torch.sum((recon - X).pow(2))
-        # feature loss if using dfc(ml)vae
-        '''
-        recon_features = model.extract_features(recon)
-        X_features = model.extract_features(X)
-        feature_loss = 0.0
-        for (r, i) in zip(recon_features, X_features):
-            feature_loss += utils.mse_loss(r, i)
-        '''
         # total loss
         recon_error.backward()
 
@@ -126,57 +124,23 @@ def get_recon_minimize(X, y, model):
     return recon, recon_error
 
 
-def main():
-    print('Initializing training and testing datasets...')
-    if args.dataset == 'mnist':
-        ds = dataloaders.mnist_loader(args.T, args.T, train=True, seed=7, transform=utils.trans_config)
-        ds_test = dataloaders.mnist_loader(100, args.T, train=False, seed=7, transform=utils.trans_config)
-    elif args.dataset == 'cifar10':
-        ds = dataloaders.cifar10_loader(args.N, args.T, train=True, seed=7, transform=utils.trans_config)
-        ds_test = dataloaders.cifar10_loader(100, args.T, train=False, seed=7, transform=utils.trans_config)
-    elif args.dataset == 'celeba':
-        ds = dataloaders.celeba_gender_change(args.N, args.T, train=True, seed=7, transform=utils.trans_config1)
-        ds_test = dataloaders.celeba_gender_change(100, args.T, train=False, seed=7, transform=utils.trans_config1)
-    elif args.dataset == 'clevr':
-        ds = dataloaders.clevr_change('n=2100T=50', args.T, utils.trans_config1_special)
-        ds_test = dataloaders.clevr_change('n=2100T=50', args.T, utils.trans_config1_special)
-    else:
-        raise Exception("invalid dataset name")
+def get_recon_onlyc(X, y, model):
+    _, _, c_mu, c_logvar = model.encode(X)
+    group_mu, group_logvar, _, _ = utils.accumulate_group_evidence(
+        c_mu.data, c_logvar.data, y
+    )
+    c_z = utils.group_wise_reparameterize(
+        mu=group_mu, logvar=group_logvar, labels_batch=y, cuda=True, training=False
+    )
+    recon = model.decode(torch.zeros(c_z.size()).to(device=device), c_z)
+    recon_error = torch.sum((recon - X).pow(2))
 
-    print('Initializing models...')
-    if args.model == 'linearmlvae':
-        model = networks.linearMLVAE(ds.data_dim, 500, args.cs_dim)
-        model_test = networks.linearMLVAE(ds.data_dim, 500, args.cs_dim)
-    elif args.model == 'dfcmlvae':
-        model = networks.dfcMLVAE()
-        model_test = networks.dfcMLVAE()
-    elif args.model == 'convmlvae':
-        model = networks.convMLVAE()
-        model_test = networks.convMLVAE()
-    else:
-        raise Exception("invalid model name")
+    return recon, recon_error
 
-    # create new directory for this training run
-    numbered_dirs = [int(f) for f in os.listdir(dir2) if f.isdigit()]
-    new_dir = '1' if not numbered_dirs else str(max(numbered_dirs) + 1)
 
-    # root dir is the directory of this particular run of experiment
-    # all data produced by training and testing will be saved in this root dir
-    root_dir = path.join(dir2, new_dir)
-    if not path.exists(root_dir):
-        os.makedirs(root_dir)
-
-    # save args
-    with open(path.join(root_dir, 'args.txt'), 'w') as f:
-        json.dump(args.__dict__, f, indent=2)
-
-    #####################################################################################
-
+def train(model, ds, root_dir):
     # should not shuffle here
     train_loader = DataLoader(ds, args.batch_size, shuffle=False, drop_last=False)
-
-    # move model to gpu
-    model.to(device=device)
 
     # load saved models if load_saved flag is true
     if args.continue_saved:
@@ -191,20 +155,15 @@ def main():
     # load_saved is false when training is started from 0th iteration
     if not args.continue_saved:
         with open(path.join(root_dir, args.log_file), 'w') as log:
-            log.write('Epoch\tIteration\tReconstruction_loss\tStyle_KL\tContent_KL\n')
+            log.write('Epoch\tIteration\tLoss\tRecon_error\tStyle_KL\tContent_KL\n')
     # initialize summary writer
     writer = SummaryWriter()
 
-    # save information for testing phase
-    curr_best_error = float('inf')
-    epoch_error = {}
-
     # start training
-    for epoch in range(args.start_epoch, args.end_epoch):
+    for epoch in range(0, args.nepochs):
         print('Epoch {}'.format(epoch))
 
         # the total loss at each epoch after running all iterations of batches
-        total_loss = 0
         iteration = 0
 
         for batch_index, (X, y) in enumerate(train_loader):
@@ -235,7 +194,6 @@ def main():
             c1_c2_kl /= args.batch_size * np.prod(ds.data_dim)
             '''
 
-
             # KL-divergence errors
             style_kl = -0.5 * torch.sum(1 + style_logvar - style_mu.pow(2) - style_logvar.exp())
             content_kl = -0.5 * torch.sum(1 + group_logvar - group_mu.pow(2) - group_logvar.exp())
@@ -253,163 +211,124 @@ def main():
             )
             reconstruction = model.decode(style_z, content_z)
             reconstruction_error = utils.mse_loss(reconstruction, X)
-            # feature loss
-            feature_loss = 0.0
-            if args.model == 'dfcmlvae':
-                reconstruction_features = model.extract_features(reconstruction)
-                input_features = model.extract_features(X)
-                for (r, i) in zip(reconstruction_features, input_features):
-                    feature_loss += utils.mse_loss(r, i)
 
-            loss = reconstruction_error + feature_loss + \
-                   float(args.beta) * (style_kl + content_kl)
-            #loss = reconstruction_error + feature_loss + \
-            #       float(args.beta) * (style_kl) + 0.001*content_kl
+            loss = reconstruction_error + float(args.beta) * (style_kl + content_kl)
             loss.backward()
-            # update optimizer
             optimizer.step()
-            # compute total loss for this epoch
-            total_loss += loss.detach().item()
 
             # print losses
-            if (iteration + 1) % 50 == 0:
-                print("Total loss:", total_loss)
-            iteration += 1
+            if batch_index % 50 == 0 or batch_index == args.batch_size - 1:
+                print('[%d/%d][%d/%d]\tLoss: %.4E | Recon error: %.4E | Style KL: %.4E | Content KL: %.4E'
+                      % (epoch, args.nepochs, batch_index, len(train_loader),
+                         loss.item(), reconstruction_error.item(), style_kl.item(), content_kl.item()))
 
             # write to log
             with open(path.join(root_dir, args.log_file), 'a') as log:
-                log.write('{0}\t{1}\t{2}\t{3}\t{4}\n'.format(
+                log.write('{0}\t{1}\t{2}\t{3}\t{4}\n{5}\n'.format(
                     epoch,
-                    iteration,
+                    batch_index,
+                    loss.detach().item(),
                     reconstruction_error.detach().item(),
                     style_kl.detach().item(),
                     content_kl.detach().item()
                 ))
 
             # write to tensorboard
-            itr = epoch * (int(len(ds) / args.batch_size) + 1) + iteration
-            writer.add_scalar('Reconstruction loss', reconstruction_error.detach().item(), itr)
+            itr = epoch * (int(len(ds) / args.batch_size) + 1) + batch_index
+            writer.add_scalar('Loss', loss.detach().item(), itr)
+            writer.add_scalar('Recon error', reconstruction_error.detach().item(), itr)
             writer.add_scalar('Style KL', style_kl.detach().item(), itr)
             writer.add_scalar('Content KL', style_kl.detach().item(), itr)
-            if args.model == 'dfcvae':
-                writer.add_scalar('Feature loss', feature_loss.detach().item(), itr)
 
         # save the model at every epoch
-        torch.save(model.state_dict(), path.join(root_dir, 'model_cur'))
+        torch.save(model.state_dict(), path.join(root_dir, 'model'))
 
 
-        if (args.val_period < args.end_epoch and epoch % args.val_period == 0) \
-                or epoch == args.end_epoch-1:
-            # run validations
-            print('\nRunning tests at epoch{}'.format(epoch))
-            recon_dir = path.join(root_dir, 'images_epoch{}'.format(epoch))
-            if not path.exists(recon_dir):
-                os.makedirs(recon_dir)
+def test(model, ds, dir, iterations):
+    print("Running tests...")
+    if args.test_method == 'graph-cut':
+        test_dir = 'errors_graph_cut'
+    else:
+        test_dir = 'errors_mean_distance'
+    test_dir_path = path.join(dir, test_dir)
+    if not path.exists(test_dir_path):
+        os.makedirs(test_dir_path)
 
-            model_test.load_state_dict(torch.load(path.join(root_dir, 'model_cur')))
-            model_test = model_test.to(device=device)
+    # start testing
+    eta_hats = []  # save predicted change points
+    etas = []
+    # iterate over test samples X_1, X_2, etc...
+    all_i = range(ds.n) if not args.dataset == 'clevr' else [args.T*6*(i-1)+j for i in range(1, 7) for j in range(5)]
+    for i in all_i:
+        etas.append(ds.cps[i])
+        # load test sample X_i
+        X = ds.get_time_series_sample(i).to(device)
 
-            # start testing
-            eta_hats = []  # save predicted change points
-            etas = []
-
-            # iterate over test samples X_1, X_2, etc...
-            if args.dataset == 'clevr':
-                all_i = [args.T*6*(i-1)+j for i in range(1,7) for j in range(5)]
+        scores = {}  # save errors for all candidate etas
+        min_eta = 2
+        max_eta = ds.T - 2
+        max_score = -float('inf')
+        eta_hat, min_G1, min_G2 = -1, None, None
+        for eta in range(min_eta, max_eta + 1):
+            # get reconstructions and errors of 2 groups
+            if args.test_method == 'graph-cut':
+                score = graph_cut(model, ds, X, eta, only_c=False)
             else:
-                all_i = range(ds_test.n)
-            for i in all_i:
-                etas.append(ds_test.cps[i])
-                # load the test sample X_i
-                X = ds_test.get_time_series_sample(i)
-                X = X.to(device=device)
+                get_recon = get_recon_plain if iterations == 0 else get_recon_minimize
+                G1, G1_error = get_recon(X[0:eta], torch.zeros(eta, 1), model)
+                G2, G2_error = get_recon(X[eta:ds.T], torch.zeros(ds.T - eta, 1), model)
+                score = - (G1_error.detach().item() + G2_error.detach().item())
+            scores[eta] = score.detach().item()
+            if score > max_score:
+                max_score = score
+                eta_hat = eta
+                # min_G1 = G1
+                # min_G2 = G2
+        eta_hats.append(eta_hat)
 
-                errors = {}  # save errors for all candidate etas
-                min_eta = 2
-                max_eta = ds_test.T - 2
-                min_total_error = float('inf')
-                eta_hat, min_recon1, min_recon2 = -1, None, None
-                for eta in range(min_eta, max_eta + 1):
-                    recon1, recon_error1 = get_recon_minimize(X[0:eta], torch.zeros(eta, 1), model_test)
-                    recon2, recon_error2 = get_recon_minimize(X[eta:ds_test.T], torch.zeros(ds_test.T - eta, 1), model_test)
-                    total_error = recon_error1.detach().item() + recon_error2.detach().item()
-                    errors[eta] = total_error
-                    if total_error < min_total_error:
-                        min_total_error = total_error
-                        eta_hat = eta
-                        min_recon1 = recon1
-                        min_recon2 = recon2
-                eta_hats.append(eta_hat)
+        # # decode(s=0, c)
+        # G1_onlyc, _ = get_recon_onlyc(X[0:eta_hat], torch.zeros(eta_hat, 1), model)
+        # G2_onlyc, _ = get_recon_onlyc(X[eta_hat:ds.T], torch.zeros(ds.T-eta_hat, 1), model)
+        #
+        # # color change points
+        # # blue strip for original images
+        # X[etas[i] - 1][0, :, -5:-1] = X[etas[i] - 1][1, :, -5:-1] = 0
+        # X[etas[i] - 1][2, :, -5:-1] = 255
+        # # red strip for reconstructions
+        # min_G1[-1][0, :, -5:-1] = 255
+        # min_G1[-1][1, :, -5:-1] = min_G1[-1][2, :, -5:-1] = 0
+        # # red strip for fixed c
+        # G1_onlyc[-1][0, :, -5:-1] = 255
+        # G1_onlyc[-1][1, :, -5:-1] = G1_onlyc[-1][2, :, -5:-1] = 0
+        # grid = make_grid(torch.cat([X,   min_G1, min_G2,   G1_onlyc, G2_onlyc]), nrow=ds.T)
+        # save_image(grid, path.join(test_dir_path, 'X_{}.png'.format(i)))
 
-                # reconstruction of g1 and g2 without minimizing P(x), i.e. iteration = 0
-                # recon1_plain, _ = get_recon(X[0:eta_hat], torch.zeros(eta_hat, 1), model_test)
-                # recon2_plain, _ = get_recon(X[eta_hat:ds_test.T], torch.zeros(ds_test.T - eta_hat, 1), model_test)
+        # save errors
+        plt.scatter(list(scores.keys()), list(scores.values()))
+        plt.axvline(x=ds.cps[i])
+        plt.axvline(x=eta_hat, color='r')
+        plt.xlabel('etas (red: eta_hat, blue: true eta)')
+        plt.ylabel('errors')
+        plt.savefig(path.join(test_dir_path, 'X_{}_errors.png'.format(i)))
+        plt.close()
 
-                # style transfer
-                style, _, _, _ = model_test.encode(X)
-                recon1_sfixed, _ = get_recon_sfixed(X[0:eta_hat], torch.zeros(eta_hat, 1), model_test, style[0])
-                recon2_sfixed, _ = get_recon_sfixed(X[eta_hat:ds_test.T],
-                                                    torch.zeros(ds_test.T - eta_hat, 1), model_test, style[0])
-
-                # t - (t-1) images
-                '''
-                recon1_diff = torch.empty(size=recon1.size())
-                recon2_diff = torch.empty(size=recon2.size())
-                recon1_diff = recon1_diff.to(device=device)
-                recon2_diff = recon2_diff.to(device=device)
-                recon1_diff[0] = recon1[0]
-                recon2_diff[0] = recon2[0]
-                for k in range(1, recon1.size(0)):
-                    recon1_diff[k] = recon1[k]-recon1[k-1]
-                for k in range(1, recon2.size(0)):
-                    recon2_diff[k] = recon2[k]-recon2[k-1]
-                '''
-                X[etas[i]-1][0,:,-3:-1] = 0
-                X[etas[i]-1][1,:,-3:-1] = 0
-                X[etas[i]-1][2,:,-3:-1] = 255
-                min_recon1[-1][0,:,-3:-1] = 255
-                min_recon1[-1][1,:,-3:-1] = 0
-                min_recon1[-1][2,:,-3:-1] = 0
-                recon1_sfixed[-1][0,:,-3:-1] = 255
-                recon1_sfixed[-1][1,:,-3:-1] = 0
-                recon1_sfixed[-1][2,:,-3:-1] = 0
-                grid = make_grid(torch.cat([X,
-                                            min_recon1, min_recon2,
-                                            recon1_sfixed, recon2_sfixed
-                                            ]), nrow=ds_test.T)
-                save_image(grid, path.join(recon_dir, 'X_{}.png'.format(i)))
-
-                # save square errors
-                plt.scatter(list(errors.keys()), list(errors.values()))
-                plt.axvline(x=ds_test.cps[i])
-                plt.axvline(x=eta_hat, color='r')
-                plt.xlabel('etas (red: eta_hat, blue: true eta)')
-                plt.ylabel('squared errors')
-                plt.savefig(path.join(recon_dir, 'X_{}_errors.png'.format(i)))
-                plt.close()
-
-            # compute mean of |eta-eta_hat| among all test samples
-            diff = np.abs(np.asarray(etas) - np.asarray(eta_hats))
-            error = np.mean(diff)
-            # keep track of the errors associated with epochs
-            epoch_error[epoch] = error
-            with open(path.join(root_dir, 'epoch_errors.txt'), 'w') as f:
-                json.dump(epoch_error, f, indent=2)
-            if error < curr_best_error:
-                curr_best_error = error
-                # save current best model
-                torch.save(model_test.state_dict(), path.join(root_dir, 'model_best'))
-                # save eta_hats of all test samples at this current best model
-                with open(root_dir + '/cps.txt', 'w') as cps_r:
-                    for tmp in eta_hats:
-                        cps_r.write('{} '.format(tmp))
-                    cps_r.write('\n')
-                    for tmp in etas:
-                        cps_r.write('{} '.format(tmp))
+    # compute mean of |eta-eta_hat| among all test samples
+    diff = np.abs(np.asarray(etas) - np.asarray(eta_hats))
+    score_mean = np.mean(diff)
+    score_std = np.std(diff)
+    # keep track of the errors associated with epochs
+    with open(path.join(test_dir_path, 'error.txt'), 'w') as f:
+        json.dump({'mean': score_mean, 'std': score_std}, f, indent=2)
+    # save etas and eta_hats
+    with open(test_dir_path + '/cps.txt', 'w') as cps_r:
+        for tmp in eta_hats:
+            cps_r.write('{} '.format(tmp))
+        cps_r.write('\n')
+        for tmp in etas:
+            cps_r.write('{} '.format(tmp))
 
 
 if __name__ == '__main__':
-    args = parser.parse_args()
     # create parent directories, like 'experiments/cifar10/linearmlvae_50'
     # and 'experiments/cifar10/dfcmlvae_128'
     dir0 = 'experiments'
@@ -422,5 +341,49 @@ if __name__ == '__main__':
     # use cpu or gpu
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # start training and/or testing
-    main()
+    print('Creating training and testing datasets...')
+    trans = transforms.Compose([transforms.Resize([args.dim_x, args.dim_y]),
+                                transforms.ToTensor()
+                                ])
+    if args.dataset == 'mnist':
+        ds = dataloaders.mnist_loader(args.N, args.T, train=True, seed=7, transform=trans)
+        ds_test = dataloaders.mnist_loader(300, args.T, train=False, seed=7, transform=trans)
+    elif args.dataset == 'cifar10':
+        ds = dataloaders.cifar10_loader(args.N, args.T, train=True, seed=7, transform=trans)
+        ds_test = dataloaders.cifar10_loader(300, args.T, train=False, seed=7, transform=trans)
+    elif args.dataset == 'celeba':
+        ds = dataloaders.celeba_gender_change(args.N, args.T, train=True, seed=7, transform=trans)
+        ds_test = dataloaders.celeba_gender_change(300, args.T, train=False, seed=7, transform=trans)
+    elif args.dataset == 'clevr':
+        ds = dataloaders.clevr_change('n=2100T=50', args.T, transform=trans)
+        ds_test = dataloaders.clevr_change('n=2100T=50', args.T, transform=trans)
+    else:
+        raise Exception("invalid dataset name")
+
+    print('Creating models...')
+    if args.model == 'linearmlvae':
+        model = networks.linearMLVAE(ds.data_dim, 500, args.cs_dim).to(device)
+    elif args.model == 'convmlvae':
+        model = networks.convMLVAE(args.cs_dim).to(device)
+    else:
+        raise Exception("invalid model name")
+
+    existing_dirs = [int(f) for f in os.listdir(dir2) if f.isdigit()]
+    if args.test == 0:
+        # create new directory for this training run
+        new = '1' if not existing_dirs else str(max(existing_dirs) + 1)
+        # root dir is the directory of this particular run of experiment
+        # all data produced by training and testing will be saved in this root dir
+        root_dir = path.join(dir2, new)
+        if not path.exists(root_dir):
+            os.makedirs(root_dir)
+        # save args
+        with open(path.join(root_dir, 'args.txt'), 'w') as f:
+            json.dump(args.__dict__, f, indent=2)
+        train(model, ds, root_dir)
+    else:
+        print("iterations = ", args.iterations)
+        for existing in existing_dirs:
+            root_dir = path.join(dir2, str(existing))
+            model.load_state_dict(torch.load(path.join(root_dir, 'model')))
+            test(model, ds_test, root_dir, int(args.iterations))

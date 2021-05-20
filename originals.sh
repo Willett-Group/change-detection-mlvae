@@ -1,1 +1,1 @@
-python originals.py --dataset clevr
+python originals.py --dataset celeba

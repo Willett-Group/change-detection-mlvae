@@ -8,32 +8,6 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 import numpy as np
 
-# compose a transform configuration
-trans_config = transforms.Compose([
-    transforms.ToTensor()
-])
-
-trans_config1 = transforms.Compose([
-    transforms.Resize([64, 64]),
-    transforms.ToTensor()
-])
-
-trans_config1_special = transforms.Compose([
-    transforms.Resize([48, 64]),
-    transforms.ToTensor()
-])
-
-trans_config2 = transforms.Compose([
-    transforms.Resize([224, 224]),
-    transforms.ToTensor()
-])
-
-trans_config2_norm = transforms.Compose([
-    transforms.Resize([224, 224]),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
-
 transform_rgb = transforms.Lambda(lambda image: image.convert('RGB'))
 transform_flatten = transforms.Lambda(lambda image: torch.flatten(image))
 
@@ -133,6 +107,7 @@ def reparameterize(mu, logvar, training):
         return eps.mul(std).add_(mu)
     else:
         return mu
+
 
 
 def group_wise_reparameterize(mu, logvar, labels_batch, cuda, training):
