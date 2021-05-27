@@ -300,7 +300,7 @@ class mnist_contrastive(Dataset):
             sample = self.mnist[random.choice(indices2)][0]
             # label = self.mnist[random.choice(indices2)][1]
 
-        return torch.cat(3 * [sample]), label
+        return torch.cat(3 * [sample])
 
     def get_ts_sample(self, n):
         X = torch.empty(size=(self.T,) + self.data_dim)

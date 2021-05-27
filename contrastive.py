@@ -27,7 +27,6 @@ parser.add_argument('--model', type=str)
 
 parser.add_argument('--N', type=int, default=1000)
 parser.add_argument('--T', type=int, default=50)
-parser.add_argument('--nclasses', type=int, default=10)
 
 parser.add_argument('--nepochs', type=int)
 parser.add_argument('--batch_size', type=int, default=250)
@@ -266,7 +265,8 @@ if __name__ == '__main__':
 
     print('Creating models...')
     if args.model == 'contrastive':
-        model = networks.TwoPathNetwork(3*64*64).to(device)
+        encoder = networks.resnet34()
+        model = networks.TwoPathNetwork(3*64*64, predefined_encoder=encoder).to(device)
     else:
         raise Exception("invalid model name")
 

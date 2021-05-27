@@ -1,4 +1,4 @@
 #!/bin/bash
 
-python contrastive.py --dataset cifar10 --nepochs 50 \
---model contrastive --nclasses 2 --test 1 --test_method 2
+python contrastive.py --dataset cifar10 --nepochs 50 --batch_size 256 \
+--model contrastive --test 0 --test_method 2
