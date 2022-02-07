@@ -3,6 +3,6 @@
 __pycache__/*
 
 experiments/
-runs/
+runs_history/
 reconstructed_images/*
 experiments/*

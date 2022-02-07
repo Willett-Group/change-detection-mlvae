@@ -102,7 +102,6 @@ def main():
         json.dump({'error': error}, f, indent=2)
 
 
-
 if __name__ == '__main__':
     args = parser.parse_args()
     # create parent directories, like 'experiments/cifar10/linearmlvae_50'

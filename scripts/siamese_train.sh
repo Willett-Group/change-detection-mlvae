@@ -1,0 +1,1 @@
+python siamese_train.py --set cifar100 --n_max 1000 --t_max 50 --p_max 50 --epochs 100 --batch_size 256 --report_freq 50 --learning_rate 0.001 --seed 0 --debug

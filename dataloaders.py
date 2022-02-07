@@ -1,531 +1,229 @@
 import random
 import os
 import os.path as path
-import numpy as np
-from PIL import Image
-import pickle
+from math import comb
 
+import numpy as np
+import pandas
+from PIL import Image
 import torch
 from torchvision import datasets
 from torch.utils.data import Dataset
 
 import utils
+from utils import transforms
 
 #################################################################################
-# directory where all datasets are saved
-dataset_dir = '../datasets/'
-
-'''data loaders for CelebA-based time series
-all samples before change points are men, all samples after change point are women
-each man sample is randomly selected from the set of all man samples in celeba
-each woman sample is randomly selected from the set of all woman samples in celeba
-label is the group number. there are 2n groups in total'''
+dataset_dir = '../data/'
 
 
-class celeba_vanilla(Dataset):
-    def __init__(self, transform, train=True):
-        split = 'train' if train else 'test'
-        self.celeba = datasets.CelebA(root=dataset_dir, download=True, split=split, transform=transform)
-        self.data_dim = self.celeba[0][0].size()
+def get_splits(t, margin_candidates, k, nclasses, nsubclasses, classes, subclasses):
+    assert k >= 2
+    assert (nclasses == 1 or nsubclasses == 1) and nclasses * nsubclasses == k
 
-    def __len__(self):
-        return len(self.celeba)
+    margins = random.sample(margin_candidates, k - 1)
+    margins.append(t)
+    margins.insert(0, 0) # first parameter is index
+    segments = []
+    for i in range(len(margins) - 1):
+        segments.append(margins[i + 1] - margins[i])
 
-    def __getitem__(self, idx):
-        sample = self.celeba[idx][0]
-        label = self.celeba[idx][1][20]
-        return sample, label
+    classes = random.sample(classes, nclasses)
+    subclasses = random.sample(subclasses, nsubclasses)
+    if nclasses == 1:
+        classes = classes * k
+    elif nsubclasses == 1:
+        subclasses = subclasses * k
 
-class celeba_gender_change(Dataset):
-    def __init__(self, n, T, transform, train=True, seed=7):
-        random.seed(seed)
-        split = 'train' if train else 'test'
-        self.celeba = datasets.CelebA(root=dataset_dir, download=True, split=split, transform=transform)
-        self.n = n
-        self.T = T
-        self.data_dim = self.celeba[0][0].size()
+    return [segments, classes, subclasses]
 
-        possible_cps = list(range(T//4, 3*T//4+1))
-        self.cps = [random.choice(possible_cps) for _ in range(n)]
-        self.men_indices = []
-        self.women_indices = []
 
-        temp_men_save = 'men_I_train.pickle' if train else 'men_I_test.pickle'
-        temp_women_save = 'women_I_train.pickle' if train else 'women_I_test.pickle'
-        if path.exists(path.join(dataset_dir, 'celeba', temp_men_save)):
-            with open(path.join(dataset_dir, 'celeba', temp_men_save), 'rb') as f:
-                self.men_indices = pickle.load(f)
-        if path.exists(path.join(dataset_dir, 'celeba', temp_women_save)):
-            with open(path.join(dataset_dir, 'celeba', temp_women_save), 'rb') as f:
-                self.women_indices = pickle.load(f)
-        if not self.men_indices and not self.women_indices:
-            for i in range(len(self.celeba)):
-                if self.celeba[i][1][20] == 1:
-                    self.men_indices.append(i)
-                else:
-                    self.women_indices.append(i)
-            with open(path.join(dataset_dir, 'celeba', temp_men_save), 'wb') as f:
-                pickle.dump(self.men_indices, f)
-            with open(path.join(dataset_dir, 'celeba', temp_women_save), 'wb') as f:
-                pickle.dump(self.women_indices, f)
+def cumulatize(splits):
+    n, _, k = splits.shape
+    result = [{} for i in range(n)]
+    snapshot = {}
+    for i in range(n):
+        result[i] = snapshot.copy()
+        for j, class_key in enumerate(splits[i][1:].transpose()):
+            class_key = tuple(class_key)
+            snapshot[class_key] = snapshot.get(class_key, 0) + splits[i][0][j]
 
-    def __len__(self):
-        return self.n*self.T
-    
-    def __getitem__(self, idx):
-        t = idx % self.T
-        row = idx // self.T
-        label = 2*row if t < self.cps[row] else 2*row + 1
+    return result
 
-        if t < self.cps[row]:
-            sample = self.celeba[random.choice(self.men_indices)][0]
+
+def discretize(segments, t):
+    k = 0
+    while t >= segments[k]:
+        t -= segments[k]
+        k += 1
+
+    return k
+
+
+def absolute(segments):
+    result = [0]*(len(segments)+1)
+    for i in range(1, len(result)):
+        result[i] = result[i-1] + segments[i-1]
+
+    return result
+
+
+# time-series datasets
+class TS(Dataset):
+    def __init__(self, dataset, split, n_max, t_max, classes, transform):
+        is_train = split == 'train'
+        if dataset == 'mnist':
+            self.dataset = datasets.MNIST(root=dataset_dir, download=True, train=is_train, transform=transform)
+        elif dataset == 'cifar10':
+            self.dataset = datasets.CIFAR10(root=dataset_dir, download=True, train=is_train, transform=transform)
+        elif dataset == 'cifar100':
+            self.dataset = datasets.CIFAR100(root=dataset_dir, download=True, train=is_train, transform=transform)
+        elif dataset == 'celeba':
+            self.dataset = datasets.CelebA(root=dataset_dir, download=True, split=split, transform=transform)
         else:
-            sample = self.celeba[random.choice(self.women_indices)][0]
+            raise Exception("Dataset not found")
+
+        self.dims = self.dataset[0][0].size()
+        self.N = n_max
+        self.T = t_max
+        min_t = max(5, self.T // 10)
+        margin_candidates = list(range(min_t, self.T - min_t))
+
+        if dataset != 'celeba':
+            indices = np.arange(len(self.dataset))
+            targets = np.array(self.dataset.targets)
+            indices_by_c = {}
+            for c in classes:
+                indices_by_c[(c, 0)] = indices[targets == c]
+            self.indices_by_c = indices_by_c
+
+            self.splits = np.asarray(
+                [get_splits(self.T, margin_candidates, 2, 2, 1, classes, [0]) for _ in range(self.N)])
+            self.splits_cum = cumulatize(self.splits)
+        else:
+            subclasses = np.unique(self.dataset.attr)
+            indices_by_c = {}
+            for subc in subclasses:
+                hits = np.where(self.dataset.attr == subc)
+                for c in classes:
+                    indices_by_c[(c, subc)] = hits[0][hits[1] == c]
+            for c_key in indices_by_c:
+                random.shuffle(indices_by_c[c_key])
+            self.indices_by_c = indices_by_c
+
+            self.splits = np.asarray(
+                [get_splits(self.T, margin_candidates, 2, 1, 2, classes, [0, 1]) for _ in range(self.N)])
+            self.splits_cum = cumulatize(self.splits)
+
+    def __len__(self):
+        return self.N * self.T
+
+    def __getitem__(self, idx):
+        n = idx // self.T
+        t = idx % self.T
+        N, _, K = self.splits.shape
+
+        segments = self.splits[n][0]
+        k = discretize(segments, t)
+
+        c_key = tuple(self.splits[n][1:].transpose()[k])
+
+        if c_key not in self.splits_cum[n]:
+            index = t
+        else:
+            index = self.splits_cum[n][c_key] + t
+        if index >= len(self.indices_by_c[c_key]):
+            random.shuffle(self.indices_by_c[c_key])
+            index = index % len(self.indices_by_c[c_key])
+        sample, _ = self.dataset[self.indices_by_c[c_key][index]]
+        label = n * K + k
 
         return sample, label
+
+    def get_x_n(self, n):
+        x = torch.empty(size=(self.T,) + self.dims)
+        for t in range(self.T):
+            x[t], _ = TS.__getitem__(self, n * self.T + t)
+
+        return x
+
+
+# contrastive dataset based on TS dataset
+class CON(TS):
+    def __init__(self, dataset, split, n_max, t_max, p_max, classes, transform):
+        super().__init__(dataset, split, n_max, t_max, classes, transform)
+        self.P = p_max
+        N, _, K = self.splits.shape
+        self.K = K
+
+    def __len__(self):
+        return self.N * self.P
+
+    def __getitem__(self, idx):
+        n = idx // self.T
+        N, _, K = self.splits.shape
+
+        segments = self.splits[n][0]
+        segments_cum = absolute(segments)
+        npros = np.asarray([comb(s, 2) for s in segments])
+        npros = npros / np.sum(npros)
+
+        is_positive = idx % self.P <= self.P // 2  # whether is positive pair
+        if is_positive:
+            k = random.choices(range(K), weights=npros, k=1)[0]
+            chosen_ts = random.sample(range(segments_cum[k], segments_cum[k+1]), K)
+        else:
+            chosen_ts = [random.sample(range(segments_cum[k], segments_cum[k+1]), 1)[0] for k in range(0, len(segments_cum)-1)]
+        samples = torch.empty(size=(self.K,) + self.dims)
+
+        for k, t in enumerate(chosen_ts):
+            samples[k] = super().__getitem__(n * self.T + t)[0]
+
+        return samples, 1 - int(is_positive)  # positive sample is labeled 0
+
+
+class clevr_change_contrastive_explicit(Dataset):
+    def __init__(self, name, T, P, transform_configuration):
+        self.dir1 = path.join(dataset_dir, 'clevr', name, 'outputnsc_images/')
+        self.dir2 = path.join(dataset_dir, 'clevr', name, 'outputsc_images/')
+        self.transform = transform_configuration
+
+        all_filenames = os.listdir(self.dir1)
+        image_1 = Image.open(self.dir1 + all_filenames[0]).convert('RGB')
+        self.data_dim = self.transform(image_1).shape
+
+        cps = {}
+        for filename in all_filenames:
+            _, _, i, t = filename.split('_')  # i-th image at time t
+            t = int(t[:-4])
+            i = int(i)
+            cps[i] = cps.get(i, 0) + 1
+
+        self.cps = cps
+
+        self.n, self.T, self.P = len(cps), T, P
+
+    def __len__(self):
+        return self.n * self.P
+
+    def __getitem__(self, item):
+        i, t = item // self.T, item % self.T
+
+        if t < self.cps[i]:
+            label = 2 * i
+            file_name = path.join(self.dir1, 'CLEVR_nonsemantic_' + str(i).zfill(6) + '_' + str(t) + '.png')
+            img = Image.open(file_name).convert('RGB')
+        else:
+            label = 2 * i + 1
+            file_name = path.join(self.dir2, 'CLEVR_semantic_' + str(i).zfill(6) + '_' + str(t - self.cps[i]) + '.png')
+            img = Image.open(file_name).convert('RGB')
+
+        return self.transform(img), label
 
     def get_time_series_sample(self, n):
         X = torch.empty(size=(self.T,) + self.data_dim)
         for t in range(self.T):
-            X[t] = self.__getitem__(self.T*n + t)[0]
-        return X
-
-
-class celeba_contrastive(celeba_gender_change):
-    def __init__(self, n, T, transform, train=True, seed=7):
-        random.seed(seed)
-        split = 'train' if train else 'test'
-        self.celeba = datasets.CelebA(root=dataset_dir, download=True, split=split, transform=transform)
-        self.n = n
-        self.T = T
-        self.data_dim = self.celeba[0][0].size()
-
-        possible_cps = list(range(T // 4, 3 * T // 4 + 1))
-        self.cps = [random.choice(possible_cps) for _ in range(n)]
-        self.men_indices = []
-        self.women_indices = []
-
-        temp_men_save = 'men_I_train.pickle' if train else 'men_I_test.pickle'
-        temp_women_save = 'women_I_train.pickle' if train else 'women_I_test.pickle'
-        if path.exists(path.join(dataset_dir, 'celeba', temp_men_save)):
-            with open(path.join(dataset_dir, 'celeba', temp_men_save), 'rb') as f:
-                self.men_indices = pickle.load(f)
-        if path.exists(path.join(dataset_dir, 'celeba', temp_women_save)):
-            with open(path.join(dataset_dir, 'celeba', temp_women_save), 'rb') as f:
-                self.women_indices = pickle.load(f)
-        if not self.men_indices and not self.women_indices:
-            for i in range(len(self.celeba)):
-                if self.celeba[i][1][20] == 1:
-                    self.men_indices.append(i)
-                else:
-                    self.women_indices.append(i)
-            with open(path.join(dataset_dir, 'celeba', temp_men_save), 'wb') as f:
-                pickle.dump(self.men_indices, f)
-            with open(path.join(dataset_dir, 'celeba', temp_women_save), 'wb') as f:
-                pickle.dump(self.women_indices, f)
-
-    def __len__(self):
-        return self.n * self.T
-
-    def __getitem__(self, idx):
-        man1 = self.celeba[random.choice(self.men_indices)][0]
-        man2 = self.celeba[random.choice(self.men_indices)][0]
-        woman1 = self.celeba[random.choice(self.women_indices)][0]
-        woman2 = self.celeba[random.choice(self.women_indices)][0]
-
-        if idx % 2 == 0:
-            v = torch.bernoulli(torch.tensor(0.5)).item()
-            if v == 0:
-                sample = [man1, man2]
-            else:
-                sample = [woman1, woman2]
-            label = 0
-        else:
-            sample = [man1, woman1]
-            label = 1
-
-        return sample, label
-
-    def get_normal(self, idx):
-        t = idx % self.T
-        row = idx // self.T
-        label = 2*row if t < self.cps[row] else 2*row + 1
-
-        if t < self.cps[row]:
-            sample = self.celeba[random.choice(self.men_indices)][0]
-        else:
-            sample = self.celeba[random.choice(self.women_indices)][0]
-
-        return sample, label
-
-    def get_ts_sample(self, n):
-        X = torch.empty(size=(self.T,) + self.data_dim)
-        for t in range(self.T):
-            X[t] = self.get_normal(self.T * n + t)[0]
-        return X
-
-
-
-class mnist_vanilla(Dataset):
-    def __init__(self, transform, train=True):
-        self.mnist = datasets.MNIST(root=dataset_dir, download=True, train=train, transform=transform)
-        self.data_dim = (3, 64, 64)
-
-    def __len__(self):
-        return len(self.mnist)
-
-    def __getitem__(self, idx):
-        sample = torch.cat(3*[self.mnist[idx][0]])
-        label = self.mnist[idx][1]
-        return sample, label
-
-####################################################################################
-# Data loaders related to MNSIT-based time series datasets
-class mnist_loader(Dataset):
-    def __init__(self, n, T, transform, train=True, seed=7):
-        random.seed(seed)
-        self.mnist = datasets.MNIST(root=dataset_dir, download=True, train=train, transform=transform)
-        self.n = n
-        self.T = T
-        self.data_dim = (3, 64, 64)
-
-        possible_cps = list(range(T//4, 3*T//4+1))
-        
-        # change points of time series samples
-        self.cps = [random.choice(possible_cps) for _ in range(self.n)]
-
-        # digits of 2 groups before and after change point
-        self.digit_pairs = [random.sample(range(10), 2) for _ in range(self.n)]
-
-        # indices of samples in mnist grouped by digits
-        self.indices_by_digit = {}
-        indices = np.array(range(len(self.mnist.data)))
-        for d in range(10):
-            self.indices_by_digit[d] = indices[self.mnist.targets == d].tolist()
-
-    def __len__(self):
-        return self.n * self.T
-    
-    def __getitem__(self, idx):
-        row = idx // self.T
-        t = idx % self.T
-
-        # get label
-        label = 2*row if t < self.cps[row] else 2*row + 1
-
-        # get sample
-        digit1, digit2 = self.digit_pairs[row]
-        indices1 = self.indices_by_digit[digit1]
-        indices2 = self.indices_by_digit[digit2]
-
-        if t < self.cps[row]:
-            sample = self.mnist[random.choice(indices1)][0]
-            # label = self.mnist[random.choice(indices1)][1]
-        else:
-            sample = self.mnist[random.choice(indices2)][0]
-            # label = self.mnist[random.choice(indices2)][1]
-
-        return torch.cat(3*[sample]), label
-
-    def get_time_series_sample(self, n):
-        X = torch.empty(size=(self.T,) + self.data_dim)
-        for t in range(self.T):
-            X[t] = self.__getitem__(self.T*n + t)[0]
-        return X
-
-
-class mnist_contrastive(Dataset):
-    def __init__(self, n, T, transform, train=True, seed=7):
-        random.seed(seed)
-        self.mnist = datasets.MNIST(root=dataset_dir, download=True, train=train, transform=transform)
-        self.n = n
-        self.T = T
-        self.data_dim = (3, 64, 64)
-
-        possible_cps = list(range(T // 4, 3 * T // 4 + 1))
-
-        # change points of time series samples
-        self.cps = [random.choice(possible_cps) for _ in range(self.n)]
-
-        # digits of 2 groups before and after change point
-        self.digit_pairs = [random.sample(range(10), 2) for _ in range(self.n)]
-
-        # indices of samples in mnist grouped by digits
-        self.indices_by_digit = {}
-        indices = np.array(range(len(self.mnist.data)))
-        for d in range(10):
-            self.indices_by_digit[d] = indices[self.mnist.targets == d].tolist()
-
-    def __len__(self):
-        return self.n * self.T
-
-    def __getitem__(self, idx):
-        d1, d2 = random.sample(range(10), 2)
-        indices1 = self.indices_by_digit[d1]
-        indices2 = self.indices_by_digit[d2]
-        d1_img1 = self.mnist[random.choice(indices1)][0]
-        d1_img2 = self.mnist[random.choice(indices1)][0]
-        d2_img1 = self.mnist[random.choice(indices2)][0]
-        d2_img2 = self.mnist[random.choice(indices2)][0]
-
-        if idx % 2 == 0:
-            v = torch.bernoulli(torch.tensor(0.5)).item()
-            if v == 0:
-                sample = [torch.cat(3 * [d1_img1]), torch.cat(3 * [d1_img2])]
-            else:
-                sample = [torch.cat(3 * [d2_img1]), torch.cat(3 * [d2_img2])]
-            label = 0
-        else:
-            sample = [torch.cat(3 * [d1_img1]), torch.cat(3 * [d2_img1])]
-            label = 1
-
-        return sample, label
-
-    def get_normal(self, idx):
-        row = idx // self.T
-        t = idx % self.T
-
-        # get label
-        label = 2 * row if t < self.cps[row] else 2 * row + 1
-
-        # get sample
-        digit1, digit2 = self.digit_pairs[row]
-        indices1 = self.indices_by_digit[digit1]
-        indices2 = self.indices_by_digit[digit2]
-
-        if t < self.cps[row]:
-            sample = self.mnist[random.choice(indices1)][0]
-            # label = self.mnist[random.choice(indices1)][1]
-        else:
-            sample = self.mnist[random.choice(indices2)][0]
-            # label = self.mnist[random.choice(indices2)][1]
-
-        return torch.cat(3 * [sample])
-
-    def get_ts_sample(self, n):
-        X = torch.empty(size=(self.T,) + self.data_dim)
-        for t in range(self.T):
-            X[t] = self.get_normal(self.T * n + t)[0]
-        return X
-
-
-class cifar10_vanilla(Dataset):
-    def __init__(self, transform, train=True):
-        self.cifar10 = datasets.CIFAR10(root=dataset_dir, download=True, train=train, transform=transform)
-        self.data_dim = (3, 64, 64)
-
-    def __len__(self):
-        return len(self.cifar10)
-
-    def __getitem__(self, idx):
-        sample = self.cifar10[idx][0]
-        label = self.cifar10[idx][1]
-        return sample, label
-
-class cifar10_loader(Dataset):
-    def __init__(self, n, T, transform, train=True, seed=7):
-        random.seed(seed)
-        self.cifar = datasets.CIFAR10(root=dataset_dir, download=True, train=train,
-                                      transform=transform)
-        self.n = n
-        self.T = T
-        self.data_dim = self.cifar[0][0].size()
-
-        possible_cps = list(range(T//4, 3*T//4+1))
-        
-        # change points of time series samples
-        self.cps = [random.choice(possible_cps) for _ in range(self.n)]
-
-        # digits of 2 groups before and after change point
-        self.digit_pairs = [random.sample(range(10), 2) for _ in range(self.n)]
-
-        # indices of samples in mnist grouped by digits
-        self.indices_by_digit = {}
-        indices = np.array(range(len(self.cifar.data)))
-        targets = np.asarray(self.cifar.targets) # labels in numpy array
-        for d in range(10):
-            self.indices_by_digit[d] = indices[targets == d].tolist()
-
-    def __len__(self):
-        return self.n * self.T
-    
-    def __getitem__(self, idx):
-        row = idx // self.T
-        t = idx % self.T
-
-        # get label
-        label = 2*row if t < self.cps[row] else 2*row + 1
-
-        # get sample
-        digit1, digit2 = self.digit_pairs[row]
-        indices1 = self.indices_by_digit[digit1]
-        indices2 = self.indices_by_digit[digit2]
-
-        if t < self.cps[row]:
-            sample = self.cifar[random.choice(indices1)][0]
-        else:
-            sample = self.cifar[random.choice(indices2)][0]
-        sample = sample.view(self.data_dim)
-
-        return sample, label
-
-    def get_time_series_sample(self, n):
-        X = torch.empty(size=(self.T,) + self.data_dim)
-        for t in range(self.T):
-            X[t] = self.__getitem__(self.T*n + t)[0]
-        return X
-
-
-class cifar10_contrastive(Dataset):
-    def __init__(self, n, T, transform, train=True, seed=7):
-        random.seed(seed)
-        self.cifar = datasets.CIFAR10(root=dataset_dir, download=True, train=train,
-                                      transform=transform)
-        self.n = n
-        self.T = T
-        self.data_dim = (3, 64, 64)
-
-        possible_cps = list(range(T // 4, 3 * T // 4 + 1))
-
-        # change points of time series samples
-        self.cps = [random.choice(possible_cps) for _ in range(self.n)]
-
-        # digits of 2 groups before and after change point
-        self.digit_pairs = [random.sample(range(10), 2) for _ in range(self.n)]
-
-        # indices of samples in cifar10 grouped by digits
-        self.indices_by_digit = {}
-        indices = np.array(range(len(self.cifar.data)))
-        targets = np.asarray(self.cifar.targets) # labels in numpy array
-        for d in range(10):
-            self.indices_by_digit[d] = indices[targets == d].tolist()
-
-    def __len__(self):
-        return self.n * self.T
-
-    def __getitem__(self, idx):
-        d1, d2 = random.sample(range(10), 2)
-        indices1 = self.indices_by_digit[d1]
-        indices2 = self.indices_by_digit[d2]
-        d1_img1 = self.cifar[random.choice(indices1)][0]
-        d1_img2 = self.cifar[random.choice(indices1)][0]
-        d2_img1 = self.cifar[random.choice(indices2)][0]
-        d2_img2 = self.cifar[random.choice(indices2)][0]
-
-        if idx % 2 == 0:
-            v = torch.bernoulli(torch.tensor(0.5)).item()
-            if v == 0:
-                sample = [d1_img1, d1_img2]
-            else:
-                sample = [d2_img1, d2_img2]
-            label = 0
-        else:
-            sample = [d1_img1, d2_img1]
-            label = 1
-
-        return sample, label
-
-    def get_normal(self, idx):
-        row = idx // self.T
-        t = idx % self.T
-
-        # get label
-        label = 2 * row if t < self.cps[row] else 2 * row + 1
-
-        # get sample
-        digit1, digit2 = self.digit_pairs[row]
-        indices1 = self.indices_by_digit[digit1]
-        indices2 = self.indices_by_digit[digit2]
-
-        if t < self.cps[row]:
-            sample = self.cifar[random.choice(indices1)][0]
-            # label = self.mnist[random.choice(indices1)][1]
-        else:
-            sample = self.cifar[random.choice(indices2)][0]
-            # label = self.mnist[random.choice(indices2)][1]
-
-        return sample, label
-
-    def get_ts_sample(self, n):
-        X = torch.empty(size=(self.T,) + self.data_dim)
-        for t in range(self.T):
-            X[t] = self.get_normal(self.T * n + t)[0]
-        return X
-
-
-
-class mnist_contrastive(Dataset):
-    def __init__(self, n, T, transform, train=True, seed=7):
-        random.seed(seed)
-        self.mnist = datasets.MNIST(root=dataset_dir, download=True, train=train, transform=transform)
-        self.n = n
-        self.T = T
-        self.data_dim = (3, 64, 64)
-
-        possible_cps = list(range(T // 4, 3 * T // 4 + 1))
-
-        # change points of time series samples
-        self.cps = [random.choice(possible_cps) for _ in range(self.n)]
-
-        # digits of 2 groups before and after change point
-        self.digit_pairs = [random.sample(range(10), 2) for _ in range(self.n)]
-
-        # indices of samples in mnist grouped by digits
-        self.indices_by_digit = {}
-        indices = np.array(range(len(self.mnist.data)))
-        for d in range(10):
-            self.indices_by_digit[d] = indices[self.mnist.targets == d].tolist()
-
-    def __len__(self):
-        return self.n * self.T
-
-    def __getitem__(self, idx):
-        d1, d2 = random.sample(range(10), 2)
-        indices1 = self.indices_by_digit[d1]
-        indices2 = self.indices_by_digit[d2]
-        d1_img1 = self.mnist[random.choice(indices1)][0]
-        d1_img2 = self.mnist[random.choice(indices1)][0]
-        d2_img1 = self.mnist[random.choice(indices2)][0]
-        d2_img2 = self.mnist[random.choice(indices2)][0]
-
-        if idx % 2 == 0:
-            v = torch.bernoulli(torch.tensor(0.5)).item()
-            if v == 0:
-                sample = [torch.cat(3 * [d1_img1]), torch.cat(3 * [d1_img2])]
-            else:
-                sample = [torch.cat(3 * [d2_img1]), torch.cat(3 * [d2_img2])]
-            label = 0
-        else:
-            sample = [torch.cat(3 * [d1_img1]), torch.cat(3 * [d2_img1])]
-            label = 1
-
-        return sample, label
-
-    def get_normal(self, idx):
-        row = idx // self.T
-        t = idx % self.T
-
-        # get label
-        label = 2 * row if t < self.cps[row] else 2 * row + 1
-
-        # get sample
-        digit1, digit2 = self.digit_pairs[row]
-        indices1 = self.indices_by_digit[digit1]
-        indices2 = self.indices_by_digit[digit2]
-
-        if t < self.cps[row]:
-            sample = self.mnist[random.choice(indices1)][0]
-            # label = self.mnist[random.choice(indices1)][1]
-        else:
-            sample = self.mnist[random.choice(indices2)][0]
-            # label = self.mnist[random.choice(indices2)][1]
-
-        return torch.cat(3 * [sample]), label
-
-    def get_ts_sample(self, n):
-        X = torch.empty(size=(self.T,) + self.data_dim)
-        for t in range(self.T):
-            X[t] = self.get_normal(self.T * n + t)[0]
+            X[t] = self.__getitem__(self.T * n + t)[0]
         return X
 
 
@@ -541,7 +239,7 @@ class clevr_change(Dataset):
 
         cps = {}
         for filename in all_filenames:
-            _, _, i, t = filename.split('_') # i-th image at time t
+            _, _, i, t = filename.split('_')  # i-th image at time t
             t = int(t[:-4])
             i = int(i)
             cps[i] = cps.get(i, 0) + 1
@@ -551,18 +249,18 @@ class clevr_change(Dataset):
         self.T = T
 
     def __len__(self):
-        return self.n*self.T
+        return self.n * self.T
 
     def __getitem__(self, item):
         i, t = item // self.T, item % self.T
 
         if t < self.cps[i]:
-            label = 2*i
-            file_name = path.join(self.dir1, 'CLEVR_nonsemantic_'+str(i).zfill(6)+'_'+str(t)+'.png')
+            label = 2 * i
+            file_name = path.join(self.dir1, 'CLEVR_nonsemantic_' + str(i).zfill(6) + '_' + str(t) + '.png')
             img = Image.open(file_name).convert('RGB')
         else:
-            label = 2*i+1
-            file_name = path.join(self.dir2, 'CLEVR_semantic_'+str(i).zfill(6)+'_'+str(t-self.cps[i])+'.png')
+            label = 2 * i + 1
+            file_name = path.join(self.dir2, 'CLEVR_semantic_' + str(i).zfill(6) + '_' + str(t - self.cps[i]) + '.png')
             img = Image.open(file_name).convert('RGB')
 
         return self.transform(img), label
@@ -570,5 +268,5 @@ class clevr_change(Dataset):
     def get_time_series_sample(self, n):
         X = torch.empty(size=(self.T,) + self.data_dim)
         for t in range(self.T):
-            X[t] = self.__getitem__(self.T*n + t)[0]
+            X[t] = self.__getitem__(self.T * n + t)[0]
         return X

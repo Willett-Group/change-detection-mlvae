@@ -6,6 +6,19 @@ from torchvision import datasets
 import torchvision.models as models
 import torch.nn.functional as F
 
+
+class ContrastiveLoss(nn.Module):
+    def __init__(self, margin=2.0):
+        super(ContrastiveLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, x1, x2, label):
+        d = F.pairwise_distance(x1, x2, keepdim=True)
+        loss = torch.mean((1-label) * torch.pow(d, 2) + label * torch.pow(torch.clamp(self.margin-d, min=0.0)), 2)
+
+        return loss
+
+
 class convMLVAE(nn.Module):
     def __init__(self, cs_dim):
         super(convMLVAE, self).__init__()
@@ -578,20 +591,13 @@ class SupConResNet(nn.Module):
 
 
 class TwoPathNetwork(nn.Module):
-    def __init__(self, input_size, intermediate_size = 500, embedding_size = 128, output_size = 1,
-                 predefined_encoder = None):
+    def __init__(self, embedding_size = 512, output_size = 1):
         super(TwoPathNetwork, self).__init__()
 
-        if predefined_encoder is None:
-            self.predefined = False
-            self.encoder = nn.Sequential(
-                nn.Linear(input_size, intermediate_size),
-                nn.ReLU(),
-                nn.Linear(intermediate_size, embedding_size)
-            )
-        else:
-            self.predefined = True
-            self.encoder = predefined_encoder
+        self.encode = nn.Sequential(
+            resnet18(),
+        )
+
         self.classifier = nn.Sequential(
             nn.Linear(embedding_size*2, embedding_size),
             nn.ReLU(),
@@ -599,21 +605,69 @@ class TwoPathNetwork(nn.Module):
             # nn.Sigmoid()
         )
 
+    def forward(self, input):
+        encode1 = self.encode(input[:, 0, :, :])
+        encode2 = self.encode(input[:, 1, :, :])
+        print(encode1.size())
+
+        distance = torch.abs(encode1 - encode2)
+
     def embed(self, x):
         z = self.encoder(x)
         z = z.view(x.size()[0], -1)
         return self.lin(z)
 
-    def encode(self, x):
-        if not self.predefined:
-            x = torch.flatten(x, start_dim=1)
-        return self.encoder(x)
-
     def classify(self, z1, z2):
         combined_var = torch.cat((z1, z2), 1)
         return self.classifier(combined_var)
 
-    def forward(self, inp1, inp2):
-        z1, z2 = self.encode(inp1), self.encode(inp2)
-        y = self.classify(z1, z2)
-        return y
+
+class SiameseNetwork(nn.Module):
+    def __init__(self):
+        super(SiameseNetwork, self).__init__()
+
+        # Setting up the Sequential of CNN Layers
+        self.encode = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.BatchNorm2d(64),
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.BatchNorm2d(128),
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),  # output: 256 x 4 x 4
+            nn.BatchNorm2d(256),
+
+            nn.Flatten(),
+            nn.Linear(1024, 256),
+        )
+
+        self.reduce = nn.Sequential(
+            nn.Linear(256, 1)
+        )
+
+    def forward(self, input):
+        encode1 = self.encode(input[:, 0, :, :])
+        encode2 = self.encode(input[:, 1, :, :])
+        # print(encode1.size())
+        # print(encode2.size())
+
+        distance = torch.abs(encode1 - encode2)
+
+        return self.reduce(distance)
+
+
+class ContrastiveNetwork(SiameseNetwork):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input):
+        encode1 = self.encode(input[:, 0, :, :])
+        encode2 = self.encode(input[:, 1, :, :])
+
+        return encode1, encode2
