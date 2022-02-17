@@ -68,25 +68,25 @@ def absolute(segments):
 
 # time-series datasets
 class TS(Dataset):
-    def __init__(self, data_dir, dataset, split, n_max, t_max, classes, transform):
+    def __init__(self, datapath, dataset, split, n_max, t_max, classes, transform):
         is_train = split == 'train'
         if dataset == 'mnist':
-            self.dataset = datasets.MNIST(root=data_dir, download=True, train=is_train, transform=transform)
+            self.dataset = datasets.MNIST(root=datapath, download=True, train=is_train, transform=transform)
         elif dataset == 'cifar10':
-            self.dataset = datasets.CIFAR10(root=data_dir, download=True, train=is_train, transform=transform)
+            self.dataset = datasets.CIFAR10(root=datapath, download=True, train=is_train, transform=transform)
         elif dataset == 'cifar100':
-            self.dataset = datasets.CIFAR100(root=data_dir, download=True, train=is_train, transform=transform)
+            self.dataset = datasets.CIFAR100(root=datapath, download=True, train=is_train, transform=transform)
         elif dataset == 'celeba':
-            self.dataset = datasets.CelebA(root=data_dir, download=True, split=split, transform=transform)
+            self.dataset = datasets.CelebA(root=datapath, download=True, split=split, transform=transform)
         else:
             raise Exception("Dataset not found")
 
         self.dims = self.dataset[0][0].size()
         self.N = n_max
         self.T = t_max
-        min_t = max(5, self.T // 10)
+        min_t = 5
+        assert self.T > 2*min_t
         margin_candidates = list(range(min_t, self.T - min_t))
-        self.margin_candidates = margin_candidates
 
         if dataset != 'celeba':
             indices = np.arange(len(self.dataset))
