@@ -1,0 +1,156 @@
+from distutils.log import error
+import sys
+import time
+import glob
+import argparse
+import logging
+import json
+import random
+from math import comb
+from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+import torch.backends.cudnn as cudnn
+from torchvision.utils import save_image
+from torchvision.utils import make_grid
+
+import dataloaders
+import networks
+import utils
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--data_dir', type=str, default='../data', help='location of the data corpus')
+parser.add_argument('--dataset', type=str, default='mnist', help='which dataset')
+parser.add_argument('--n_max', type=int, default=1000)
+parser.add_argument('--t_max', type=int, default=50)
+parser.add_argument('--num_workers', type=int, default=4, help='number of workers')
+parser.add_argument('--seed', type=int, default=0, help='random seed')
+parser.add_argument('--save', type=str, default = 'TEST', help='experiment name')
+parser.add_argument('--model_path', type=str, default = 'TRAIN-20220213-200526', help='path of pre-trained weights')
+parser.add_argument('--method', type=str, default='naive')
+parser.add_argument('--loss_variant', type=int, default=0)
+args = parser.parse_args()
+args.save = Path('runs', args.model_path, f'{args.save}-{time.strftime("%Y%m%d-%H%M%S")}')
+utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
+
+
+# logging
+log_format = '%(asctime)s %(message)s'
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=log_format, datefmt='%m/%d %I:%M:%S %p')
+fh = logging.FileHandler(Path(args.save, 'log.txt'))
+fh.setFormatter(logging.Formatter(log_format))
+logging.getLogger().addHandler(fh)
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def PairsGroupsLoss(scores, eta, variant):
+    l1 = utils.AvgrageMeter()
+    l2 = utils.AvgrageMeter()
+    l3 = utils.AvgrageMeter()
+
+    T = scores.shape[0]
+    for t1 in range(T):
+        for t2 in range(t1+1, T):
+            s = scores[t1][t2]
+            if t1 < eta and t2 >= eta:
+                l1.update(s, 1)
+            elif t1 < eta and t2 < eta:
+                l2.update(s, 1)
+            else:
+                l3.update(s, 1)
+    assert l1.cnt == eta*(T-eta)
+    assert l2.cnt == comb(eta, 2)
+    assert l3.cnt == comb(T-eta, 2)
+    
+    if variant == 0:
+        l = l2.avg + l3.avg - 2*l1.avg
+    else:
+        l = (l2.sum + l3.sum) / (l2.cnt + l3.cnt) - l1.avg
+    
+    return l
+
+
+def main():
+    logging.info("args = %s", args)
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    set_seed(args.seed)
+    cudnn.benchmark = True
+    cudnn.enabled = True
+
+    classes = {
+        'mnist': range(10),
+        'cifar10': range(10),
+        'cifar100': range(100),
+        'celeba': [20]
+    }
+    test_data_ts = dataloaders.TS(args.data_dir, args.dataset, 'valid', n_max=args.n_max, t_max=args.t_max,
+                                     classes=classes[args.dataset], transform=utils.transforms[args.dataset])
+    test_queue_ts = DataLoader(test_data_ts, shuffle=False, num_workers=args.num_workers, batch_size=test_data_ts.T)
+
+    ckpt = torch.load(Path('runs', args.model_path, 'checkpoint.pth.tar'))
+    model = networks.SiameseNet(arch='cnn').to(device)
+    model.load_state_dict(ckpt['model'])
+    model.eval()
+
+    errors = utils.AvgrageMeter()
+    for step, (input, _) in enumerate(test_queue_ts): # step = n, input = X_n
+        input = input.to(device)
+        T = input.size(0)
+
+        scores = np.zeros((T, T))
+        for t1 in range(T):
+            for t2 in range(T):
+                if args.method == 'naive':
+                    s = torch.norm(input[t1]-input[t2])
+                elif args.method == 'siamese':
+                    s = model(torch.unsqueeze(torch.stack((input[t1], input[t2]), dim=0), 0))
+                    s = torch.sigmoid(s).item()
+                scores[t1][t2] = s
+
+        ls = {} # L(eta)
+        min_l = float('inf')
+        eta_hat = None
+        for eta in test_data_ts.margin_candidates:
+            l = PairsGroupsLoss(scores, eta, variant=args.loss_variant)
+            ls[eta] = l
+            if l < min_l:
+                min_l = l
+                eta_hat = eta
+        
+        eta = test_data_ts.splits[step][0][0]
+        err = np.abs(eta - eta_hat)
+        errors.update(err)
+        logging.info(f'[{step}] err {errors.avg:03f} err_std {np.std(errors.values):03f}')
+        pct_0 = utils.percent_by_bound(errors.values, 0)
+        pct_1 = utils.percent_by_bound(errors.values, 1)
+        pct_2 = utils.percent_by_bound(errors.values, 2)
+        pct_5 = utils.percent_by_bound(errors.values, 5)
+        pct_10 = utils.percent_by_bound(errors.values, 10)
+        logging.info(f'[{step}] pct_0 {pct_0:03f} pct_1 {pct_1:03f} pct_2 {pct_2:03f} pct_5 {pct_5:03f} pct_10 {pct_10:03f}')
+        
+        if err > 1: # visualize bad ones
+            save_image(make_grid(input, nrow=T), Path(args.save, f'X_{step}.png'))
+            plt.scatter(list(ls.keys()), list(ls.values()))
+            plt.axvline(x=eta, color='b')
+            plt.axvline(x=eta_hat, color='r')
+            plt.xlabel('eta (red: prediction, blue: groundtruth)')
+            plt.ylabel('L(eta)')
+            plt.savefig(Path(args.save, 'X_{}_errors.png'.format(step)))
+            plt.close()
+
+
+if __name__ == '__main__':
+    main()

@@ -14,8 +14,6 @@ import utils
 from utils import transforms
 
 #################################################################################
-dataset_dir = '../data/'
-
 
 def get_splits(t, margin_candidates, k, nclasses, nsubclasses, classes, subclasses):
     assert k >= 2
@@ -70,16 +68,16 @@ def absolute(segments):
 
 # time-series datasets
 class TS(Dataset):
-    def __init__(self, dataset, split, n_max, t_max, classes, transform):
+    def __init__(self, data_dir, dataset, split, n_max, t_max, classes, transform):
         is_train = split == 'train'
         if dataset == 'mnist':
-            self.dataset = datasets.MNIST(root=dataset_dir, download=True, train=is_train, transform=transform)
+            self.dataset = datasets.MNIST(root=data_dir, download=True, train=is_train, transform=transform)
         elif dataset == 'cifar10':
-            self.dataset = datasets.CIFAR10(root=dataset_dir, download=True, train=is_train, transform=transform)
+            self.dataset = datasets.CIFAR10(root=data_dir, download=True, train=is_train, transform=transform)
         elif dataset == 'cifar100':
-            self.dataset = datasets.CIFAR100(root=dataset_dir, download=True, train=is_train, transform=transform)
+            self.dataset = datasets.CIFAR100(root=data_dir, download=True, train=is_train, transform=transform)
         elif dataset == 'celeba':
-            self.dataset = datasets.CelebA(root=dataset_dir, download=True, split=split, transform=transform)
+            self.dataset = datasets.CelebA(root=data_dir, download=True, split=split, transform=transform)
         else:
             raise Exception("Dataset not found")
 
@@ -88,6 +86,7 @@ class TS(Dataset):
         self.T = t_max
         min_t = max(5, self.T // 10)
         margin_candidates = list(range(min_t, self.T - min_t))
+        self.margin_candidates = margin_candidates
 
         if dataset != 'celeba':
             indices = np.arange(len(self.dataset))
@@ -160,7 +159,7 @@ class CON(TS):
         return self.N * self.P
 
     def __getitem__(self, idx):
-        n = idx // self.T
+        n = idx // self.P
         N, _, K = self.splits.shape
 
         segments = self.splits[n][0]

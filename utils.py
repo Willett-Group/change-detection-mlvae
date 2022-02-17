@@ -27,8 +27,8 @@ transform_config5 = transforms.Compose([
 
 transforms = {
     'mnist': transforms.Compose([
-        transforms.Grayscale(num_output_channels=1),
-        # transforms.RandomHorizontalFlip(),
+        transforms.Resize([32, 32]),
+        transforms.Grayscale(num_output_channels=3),
         transforms.ToTensor(),
     ]),
     'cifar10': transforms.Compose([
@@ -205,15 +205,26 @@ class AvgrageMeter(object):
         self.reset()
 
     def reset(self):
-        self.avg = 0
         self.sum = 0
         self.cnt = 0
+        self.avg = 0
+        self.values = []
 
     def update(self, val, n=1):
         self.sum += val * n
         self.cnt += n
         self.avg = self.sum / self.cnt
+        for _ in range(n):
+            self.values.append(val)
 
+
+def percent_by_bound(values, bound=0):
+    cnt = 0
+    for v in values:
+        if v <= bound:
+            cnt += 1
+    
+    return cnt / len(values)
 
 def accuracy(output, target, topk=(1,)):
     maxk = max(topk)
@@ -322,12 +333,11 @@ def drop_path(x, drop_prob):
 
 
 def create_exp_dir(path, scripts_to_save=None):
-    if not os.path.exists(path):
-        os.mkdir(path)
+    os.makedirs(path, exist_ok=True)
     print('Experiment dir : {}'.format(path))
 
     if scripts_to_save is not None:
-        os.mkdir(os.path.join(path, 'scripts'))
+        os.makedirs(os.path.join(path, 'scripts'), exist_ok=True)
         for script in scripts_to_save:
             dst_file = os.path.join(path, 'scripts', os.path.basename(script))
             shutil.copyfile(script, dst_file)

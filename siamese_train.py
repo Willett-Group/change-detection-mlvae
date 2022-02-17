@@ -8,6 +8,7 @@ import argparse
 import random
 from math import comb
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -26,9 +27,6 @@ import torchvision.transforms as transforms
 import dataloaders
 import networks
 import utils
-from TNN import Mining, Model
-from TNN.Plot import scatter
-from TNN.Loss_Fn import triplet_loss
 
 ################################################################################
 parser = argparse.ArgumentParser()
@@ -37,7 +35,6 @@ parser.add_argument('--set', type=str, default='mnist', help='which dataset')
 parser.add_argument('--n_max', type=int, default=1000)
 parser.add_argument('--t_max', type=int, default=50)
 parser.add_argument('--p_max', type=int, default=50)
-
 parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
@@ -47,21 +44,14 @@ parser.add_argument('--resume_dir', type=str)
 parser.add_argument('--debug', action='store_true', default=False, help='debug mode')
 parser.add_argument('--num_workers', type=int, default=4, help='number of workers')
 parser.add_argument('--seed', type=int, default=0, help='random seed')
-
-parser.add_argument('--learning_rate', type=float, default=0.0005, help='adam learning rate')
+parser.add_argument('--lr', type=float, default=0.1, help='adam/sgd learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
-
 parser.add_argument('--test_method', default='1')
-# 1 for graph cut, using G(i, j) as the score
-# 2 for
-
 args = parser.parse_args()
-dirs = ['runs', 'runs_trash']
-for d in dirs:
-    os.makedirs(d, exist_ok=True)
-save_directory = dirs[1] if args.debug else dirs[0]
-args.save = os.path.join(save_directory, '{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S")))
+
+
+args.save = Path('runs', f'{args.save}-{time.strftime("%Y%m%d-%H%M%S")}')
 utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
 
 # logging
@@ -75,7 +65,7 @@ writer = SummaryWriter(args.save)
 
 
 # use the value for each pair to compute the score at an eta value
-def graph_cut(pair_values, eta):
+def graph_cut(scores, eta):
     E_r = 0
     E_rc = 0
     E_r_count = 0
@@ -83,10 +73,10 @@ def graph_cut(pair_values, eta):
     for d1 in range(ds.T):
         for d2 in range(ds.T):
             if (d1 < eta and d2 < eta) or (d1 >= eta and d2 >= eta):
-                E_rc += pair_values[d1][d2]
+                E_rc += scores[d1][d2]
                 E_rc_count += 1
             else:
-                E_r += pair_values[d1][d2]
+                E_r += scores[d1][d2]
                 E_r_count += 1
     score = E_r / E_r_count - E_rc / E_rc_count
 
@@ -184,164 +174,6 @@ def ts_sample_precision(ps, eta):
     return positive_count / positive_n, negative_count / negative_n
 
 
-def test(model, ds):
-    model.eval()
-
-    eta_hats = []  # save predicted change points
-    etas = []
-    # iterate over ts test samples X_1, X_2, etc...
-    all_i = range(ds.N) if not args.dataset == 'clevr' else [args.T*6*(i-1)+j for i in range(1, 7) for j in range(5)]
-
-
-    for i in all_i:
-        print("Running test ts sample X_%d" % i)
-        etas.append(ds.cps[i])
-        # load test sample X_i
-        X = ds.get_x_i(i).to(device)
-        grid = make_grid(X, nrow=args.T)
-        save_image(grid, path.join(args.save, 'X_{}.png'.format(i)))
-
-        scores = {}  # save errors for all candidate etas
-        min_eta = 2
-        max_eta = ds.T - 2
-        max_score = -float('inf')
-        eta_hat = -1
-
-        embeddings = model(X)
-        distances = Mining._pairwise_distances(embeddings, squared=True, device=device)
-        distances_df = pd.DataFrame(distances).round(3)
-        distances_df.to_csv(path.join(args.save, 'X_%d_distances.csv' % i))
-
-        for eta in range(min_eta, max_eta + 1):
-            score = graph_cut(distances.detach().cpu().numpy(), eta)
-            scores[eta] = score
-            if score > max_score:
-                max_score = score
-                eta_hat = eta
-        eta_hats.append(eta_hat)
-
-        # save errors
-        print(scores)
-        plt.scatter(list(scores.keys()), list(scores.values()))
-        plt.axvline(x=ds.cps[i])
-        plt.axvline(x=eta_hat, color='r')
-        plt.xlabel('etas (red: eta_hat, blue: true eta)')
-        plt.ylabel('scores')
-        plt.savefig(path.join(args.save, 'X_{}_errors.png'.format(i)))
-        plt.close()
-
-    # compute mean of |eta-eta_hat| among all test samples
-    diff = np.abs(np.asarray(etas) - np.asarray(eta_hats))
-    score_mean = np.mean(diff)
-    score_std = np.std(diff)
-    # keep track of the errors associated with epochs
-    with open(path.join(args.save, 'test_stats.txt'), 'w') as f:
-        json.dump({'mean': score_mean, 'std': score_std}, f, indent=2)
-    # save etas and eta_hats
-    with open(args.save + '/cps.txt', 'w') as cps_r:
-        for tmp in eta_hats:
-            cps_r.write('{} '.format(tmp))
-        cps_r.write('\n')
-        for tmp in etas:
-            cps_r.write('{} '.format(tmp))
-
-
-
-def testo(model, ds, dir):
-    model.eval()
-
-    if args.test_method == '1':
-        test_dir = 'errors_graph_cut'
-    else:
-        test_dir = 'errors_'+args.test_method
-    test_dir_path = path.join(dir, test_dir)
-    if not path.exists(test_dir_path):
-        os.makedirs(test_dir_path)
-
-    eta_hats = []  # save predicted change points
-    etas = []
-    # iterate over ts test samples X_1, X_2, etc...
-    all_i = range(ds.n) if not args.dataset == 'clevr' else [args.T*6*(i-1)+j for i in range(1, 7) for j in range(5)]
-
-
-
-    for i in all_i:
-        print("Running test ts sample X_%d" % i)
-        etas.append(ds.cps[i])
-        # load test sample X_i
-        X = ds.get_x_i(i).to(device)
-        grid = make_grid(X, nrow=args.T)
-        save_image(grid, path.join(test_dir_path, 'X_{}.png'.format(i)))
-
-        scores = {}  # save errors for all candidate etas
-        min_eta = 2
-        max_eta = ds.T - 2
-        max_score = -float('inf')
-        eta_hat = -1
-
-        random.seed(7)
-        M=20
-        L = torch.zeros((M,) + ds.data_dim)
-        if i == 0:
-            for j in range(M):
-                index = random.choice(list(range(ds.n * ds.T)))
-                L[j] = torch.FloatTensor(ds.get_normal(index)[0])
-            L = L.to(device)
-            grid = make_grid(L, nrow=M)
-            save_image(grid, path.join(test_dir_path, 'L.png'.format(i)))
-        R = torch.zeros(X.size(0), M)
-        for j in range(X.size(0)):
-            R[j] = torch.FloatTensor([model.forward(X[i].unsqueeze_(0), L[m].unsqueeze_(0)) for m in range(M)]).detach()
-            R[j] = torch.sigmoid(R[j])
-        print(R)
-
-        if args.test_method == '1':
-            ps, gs = compute_pair_values(model, ds, X)
-            ps_df, gs_df = pd.DataFrame(ps).round(3), pd.DataFrame(gs).round(3)
-            binary_df = pd.DataFrame(1 * (ps >= 0.5))
-            ps_df.to_csv(path.join(test_dir_path, 'X_%d_ps.csv' % i))
-            gs_df.to_csv(path.join(test_dir_path, 'X_%d_gs.csv' % i))
-            binary_df.to_csv(path.join(test_dir_path, 'X_%d_b.csv' % i))
-        for eta in range(min_eta, max_eta + 1):
-            if args.test_method == '1':
-                score = graph_cut(ps, eta)
-            elif args.test_method == '2a':
-                score = option2a(R, eta)
-            elif args.test_method == '2b':
-                score = option2b(R, eta, 1)
-            elif args.test_method == '2c':
-                pass
-
-            scores[eta] = score
-            if score > max_score:
-                max_score = score
-                eta_hat = eta
-        eta_hats.append(eta_hat)
-
-        # save errors
-        plt.scatter(list(scores.keys()), list(scores.values()))
-        plt.axvline(x=ds.cps[i])
-        plt.axvline(x=eta_hat, color='r')
-        plt.xlabel('etas (red: eta_hat, blue: true eta)')
-        plt.ylabel('errors')
-        plt.savefig(path.join(test_dir_path, 'X_{}_errors.png'.format(i)))
-        plt.close()
-
-    # compute mean of |eta-eta_hat| among all test samples
-    diff = np.abs(np.asarray(etas) - np.asarray(eta_hats))
-    score_mean = np.mean(diff)
-    score_std = np.std(diff)
-    # keep track of the errors associated with epochs
-    with open(path.join(test_dir_path, 'test_stats.txt'), 'w') as f:
-        json.dump({'mean': score_mean, 'std': score_std}, f, indent=2)
-    # save etas and eta_hats
-    with open(test_dir_path + '/cps.txt', 'w') as cps_r:
-        for tmp in eta_hats:
-            cps_r.write('{} '.format(tmp))
-        cps_r.write('\n')
-        for tmp in etas:
-            cps_r.write('{} '.format(tmp))
-
 
 def set_seed(seed):
     random.seed(seed)
@@ -352,18 +184,16 @@ def set_seed(seed):
 
 
 def visualize():
-    train_data_ts = dataloaders.TS(args.set, 'train', n_max=args.n_max, t_max=args.t_max, classes=range(10),
-                                   transform=utils.transforms[args.set])
-    image = torch.cat([train_data_ts.get_x_n(n) for n in range(0, 1)], dim=0)
-    save_image(make_grid(image, nrow=train_data_ts.T), path.join(args.save, 'TS.png'))
-
     train_data_con = dataloaders.CON(args.set, 'train', n_max=args.n_max, t_max=args.t_max, p_max=args.p_max,
                                      classes=range(10), transform=utils.transforms[args.set])
     image = torch.cat([train_data_con[n][0] for n in range(0 * train_data_con.P, 1 * train_data_con.P)], dim=0)
     save_image(make_grid(image, nrow=train_data_con.P), path.join(args.save, 'CON.png'))
 
+    image = torch.cat([train_data_con.get_x_n(n) for n in range(0, 1)], dim=0)
+    save_image(make_grid(image, nrow=train_data_con.T), path.join(args.save, 'TS.png'))
 
-def train(train_queue, valid_queue, model, criterion, optimizer, epoch):
+
+def train(train_queue, model, criterion, optimizer, epoch):
     model.train()
     objs = utils.AvgrageMeter()
     top1 = utils.AvgrageMeter()
@@ -379,7 +209,7 @@ def train(train_queue, valid_queue, model, criterion, optimizer, epoch):
         output = torch.flatten(output)
         p = torch.sigmoid(output)
         logits = torch.stack((1-p, p), dim=1)
-        loss = criterion(p, target)
+        loss = criterion(output, target)
         loss.backward()
         optimizer.step()
 
@@ -415,7 +245,7 @@ def infer(valid_queue, model, criterion, epoch):
         output = torch.flatten(output)
         p = torch.sigmoid(output)
         logits = torch.stack((1 - p, p), dim=1)
-        loss = criterion(p, target)
+        loss = criterion(output, target)
 
         prec1, = utils.accuracy(logits, target, topk=(1,))
         objs.update(loss.item(), n)
@@ -445,16 +275,24 @@ def main():
     cudnn.enabled = True
 
     visualize()
+    classes = {
+        'mnist': range(10),
+        'cifar10': range(10),
+        'cifar100': range(100),
+        'celeba': [20]
+    }
     train_data_con = dataloaders.CON(args.set, 'train', n_max=args.n_max, t_max=args.t_max, p_max=args.p_max,
-                                     classes=range(10), transform=utils.transforms[args.set])
-    valid_data_con = dataloaders.CON(args.set, 'valid', n_max=args.n_max, t_max=args.t_max, p_max=args.p_max,
-                                     classes=range(10), transform=utils.transforms[args.set])
+                                     classes=classes[args.set], transform=utils.transforms[args.set])
+    valid_data_con = dataloaders.CON(args.set, 'valid', n_max=200, t_max=args.t_max, p_max=args.p_max,
+                                     classes=classes[args.set], transform=utils.transforms[args.set])
     train_queue_con = DataLoader(train_data_con, shuffle=True, num_workers=args.num_workers, batch_size=args.batch_size)
-    valid_queue_con = DataLoader(valid_data_con, shuffle=True, num_workers=args.num_workers, batch_size=args.batch_size)
+    valid_queue_con = DataLoader(valid_data_con, shuffle=False, num_workers=args.num_workers, batch_size=args.batch_size)
 
-    model = networks.TwoPathNetwork().cuda()
+    model = networks.SiameseNet(arch='cnn').cuda()
     criterion = nn.BCEWithLogitsLoss().cuda()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
 
     best_acc = 0.0
     is_best = False
@@ -464,8 +302,8 @@ def main():
         start_time = time.time()
 
         logging.info('epoch %d', epoch)
-        train_acc, train_obj = train(train_queue_con, valid_queue_con, model, criterion, optimizer, epoch)
-        logging.info('train_acc %f train_loss %e', train_acc, train_obj)
+        train_acc, train_obj = train(train_queue_con, model, criterion, optimizer, epoch)
+        logging.info('train_acc %f train_loss %e \n', train_acc, train_obj)
         with torch.no_grad():
             valid_acc, valid_obj = infer(valid_queue_con, model, criterion, epoch)
         if valid_acc > best_acc:
@@ -473,7 +311,8 @@ def main():
             is_best = True
         else:
             is_best = False
-        logging.info('valid_acc %f best_acc %f valid_loss %e', valid_acc, best_acc, valid_obj)
+        # scheduler.step()
+        logging.info('valid_acc %f best_acc %f valid_loss %e\n', valid_acc, best_acc, valid_obj)
 
         utils.save_checkpoint({
             'epoch': epoch,

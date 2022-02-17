@@ -2,7 +2,4 @@
 .vscode/*
 __pycache__/*
 
-experiments/
-runs_history/
-reconstructed_images/*
-experiments/*
+runs/
