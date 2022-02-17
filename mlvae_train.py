@@ -51,29 +51,6 @@ img_shape = (args.channels, args.dim_x, args.dim_y)
 ################################################################################
 
 
-def graph_cut(model, ds, X, eta, only_c = True):
-    s_mu, _, c_mu, _ = model.encode(X)
-
-    E_r = 0
-    E_rc = 0
-    E_r_count = 0
-    E_rc_count = 0
-    for d1 in range(ds.T):
-        for d2 in range(ds.T):
-            if (d1 <= eta and d2 < eta) or (d1 > eta and d2 > eta):
-                E_rc += torch.sum(torch.square(c_mu[d1] - c_mu[d2]))
-                if not only_c:
-                    E_rc += torch.sum(torch.square(s_mu[d1] - s_mu[d2]))
-                E_rc_count += 1
-            else:
-                E_r += torch.sum(torch.square(c_mu[d1] - c_mu[d2]))
-                if not only_c:
-                    E_r += torch.sum(torch.square(s_mu[d1] - s_mu[d2]))
-                E_r_count += 1
-    score = E_r / E_r_count - E_rc / E_rc_count
-
-    return score
-
 def get_recon_plain(X, y, model):
     # style is individual, content is group
     s_mu, s_logvar, c_mu, c_logvar = model.encode(X)

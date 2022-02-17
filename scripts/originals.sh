@@ -1,1 +1,0 @@
-python originals.py --dataset celeba

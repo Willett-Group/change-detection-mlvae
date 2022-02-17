@@ -1,28 +1,12 @@
-import shutil
 import os
+import shutil
 
 import numpy as np
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
 from torch.autograd import Variable
 import torchvision.transforms as transforms
 from torch.utils.data.sampler import SubsetRandomSampler
-
-
-transform_rgb = transforms.Lambda(lambda image: image.convert('RGB'))
-transform_flatten = transforms.Lambda(lambda image: torch.flatten(image))
-
-transform_config4 = transforms.Compose([
-    transforms.Resize([64, 64]),
-    transform_rgb,
-    transforms.ToTensor()
-])
-
-transform_config5 = transforms.Compose([
-    transforms.ToTensor(),
-    transform_flatten
-])
 
 
 transforms = {
@@ -52,6 +36,7 @@ transforms = {
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ]),
+    'rgb': transforms.Lambda(lambda image: image.convert('RGB'))
 }
 
 
@@ -127,11 +112,6 @@ def l1_loss(input, target):
     return torch.sum(torch.abs(input - target)) / input.data.nelement()
 
 
-def normal_density(eps):
-    # eps is a 1 by 1 tensor
-    return 1
-
-
 def reparameterize(mu, logvar, training):
     if training:
         std = logvar.mul(0.5).exp_()
@@ -198,7 +178,6 @@ def subset_sampler(ds, T, test_split, shuffle, random_seed):
     return train_sampler, test_indices
 
 
-
 class AvgrageMeter(object):
 
     def __init__(self):
@@ -218,14 +197,6 @@ class AvgrageMeter(object):
             self.values.append(val)
 
 
-def percent_by_bound(values, bound=0):
-    cnt = 0
-    for v in values:
-        if v <= bound:
-            cnt += 1
-    
-    return cnt / len(values)
-
 def accuracy(output, target, topk=(1,)):
     maxk = max(topk)
     batch_size = target.size(0)
@@ -241,66 +212,13 @@ def accuracy(output, target, topk=(1,)):
     return res
 
 
-class Cutout(object):
-    def __init__(self, length):
-        self.length = length
-
-    def __call__(self, img):
-        h, w = img.size(1), img.size(2)
-        mask = np.ones((h, w), np.float32)
-        y = np.random.randint(h)
-        x = np.random.randint(w)
-
-        y1 = np.clip(y - self.length // 2, 0, h)
-        y2 = np.clip(y + self.length // 2, 0, h)
-        x1 = np.clip(x - self.length // 2, 0, w)
-        x2 = np.clip(x + self.length // 2, 0, w)
-
-        mask[y1: y2, x1: x2] = 0.
-        mask = torch.from_numpy(mask)
-        mask = mask.expand_as(img)
-        img *= mask
-        return img
-
-
-def _data_transforms_cifar10(args):
-    CIFAR_MEAN = [0.49139968, 0.48215827, 0.44653124]
-    CIFAR_STD = [0.24703233, 0.24348505, 0.26158768]
-
-    train_transform = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(CIFAR_MEAN, CIFAR_STD),
-    ])
-    if args.cutout:
-        train_transform.transforms.append(Cutout(args.cutout_length))
-
-    valid_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(CIFAR_MEAN, CIFAR_STD),
-    ])
-    return train_transform, valid_transform
-
-
-def _data_transforms_cifar100(args):
-    CIFAR_MEAN = [0.5071, 0.4867, 0.4408]
-    CIFAR_STD = [0.2675, 0.2565, 0.2761]
-
-    train_transform = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(CIFAR_MEAN, CIFAR_STD),
-    ])
-    if args.cutout:
-        train_transform.transforms.append(Cutout(args.cutout_length))
-
-    valid_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(CIFAR_MEAN, CIFAR_STD),
-    ])
-    return train_transform, valid_transform
+def percent_by_bound(values, bound=0):
+    cnt = 0
+    for v in values:
+        if v <= bound:
+            cnt += 1
+    
+    return cnt / len(values)
 
 
 def count_parameters_in_MB(model):
@@ -321,15 +239,6 @@ def save(model, model_path):
 
 def load(model, model_path):
     model.load_state_dict(torch.load(model_path))
-
-
-def drop_path(x, drop_prob):
-    if drop_prob > 0.:
-        keep_prob = 1. - drop_prob
-        mask = Variable(torch.cuda.FloatTensor(x.size(0), 1, 1, 1).bernoulli_(keep_prob))
-        x.div_(keep_prob)
-        x.mul_(mask)
-    return x
 
 
 def create_exp_dir(path, scripts_to_save=None):

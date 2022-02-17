@@ -31,7 +31,7 @@ parser.add_argument('--datapath', type=str, default='../data', help='location of
 parser.add_argument('--dataset', type=str, default='mnist', help='which dataset')
 parser.add_argument('--n_max', type=int, default=1000, help='numbe of time series samples')
 parser.add_argument('--t_max', type=int, default=50, help='number of timestamps in a time series sample')
-parser.add_argument('--method', type=str, default='siamese', help='which method of computing the matrix')
+parser.add_argument('--method', type=str, default='siamese_p', help='which method of computing the matrix')
 parser.add_argument('--loss_variant', type=int, default=1, help='which variant of the loss on matrix')
 
 parser.add_argument('--model_path', type=str, default='TRAIN-20220213-200526', help='path of pre-trained weights')
@@ -130,9 +130,19 @@ def main():
             for t2 in range(T):
                 if args.method == 'naive':
                     s = torch.norm(input[t1]-input[t2])
-                elif args.method == 'siamese':
-                    s = model(torch.unsqueeze(torch.stack((input[t1],input[t2]), dim=0), 0))
+                elif args.method == 'mlvae':
+                    pass
+                elif args.method == 'siamese_p':
+                    s = model(torch.unsqueeze(torch.stack((input[t1], input[t2]), dim=0), 0))
                     s = torch.sigmoid(s).item()
+                elif args.method == 'siamese_logp':
+                    s = model(torch.unsqueeze(torch.stack((input[t1], input[t2]), dim=0), 0))
+                    s = torch.sigmoid(s).item()
+                    if s == 1:
+                        s -= 0.0001
+                    s = np.log(s / (1-s))
+                elif args.method == 'siamese_dist':
+                    pass
                 else:
                     raise Exception("incorrect method to compute the scores matrix")
                 scores[t1][t2] = s
@@ -158,7 +168,7 @@ def main():
         logging.info(f'[{step}] err {errors.avg:03f} err_std {np.std(errors.values):03f}')
         logging.info(f'[{step}] pct_0 {pct_0:03f} pct_1 {pct_1:03f} pct_2 {pct_2:03f} pct_5 {pct_5:03f} pct_10 {pct_10:03f}')
         
-        if err > 1: # visualize bad predictions
+        if err > -1: # visualize bad predictions
             save_image(make_grid(input, nrow=T), Path(args.save, f'X_{step}.png'))
             plt.scatter(list(ls.keys()), list(ls.values()))
             plt.axvline(x=eta, color='b')
