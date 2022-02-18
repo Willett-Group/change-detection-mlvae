@@ -21,7 +21,7 @@ import torch.backends.cudnn as cudnn
 from torchvision.utils import save_image
 from torchvision.utils import make_grid
 
-import dataloaders
+import datasets
 import networks
 import utils
 
@@ -101,7 +101,7 @@ def main():
         'cifar100': range(100),
         'celeba': [20]
     }
-    test_data_ts = dataloaders.TS(
+    test_data_ts = datasets.TS(
         datapath=args.datapath,
         dataset=args.dataset,
         split='valid',
@@ -168,7 +168,7 @@ def main():
         logging.info(f'[{step}] err {errors.avg:03f} err_std {np.std(errors.values):03f}')
         logging.info(f'[{step}] pct_0 {pct_0:03f} pct_1 {pct_1:03f} pct_2 {pct_2:03f} pct_5 {pct_5:03f} pct_10 {pct_10:03f}')
         
-        if err > -1: # visualize bad predictions
+        if err > 1: # visualize bad predictions
             save_image(make_grid(input, nrow=T), Path(args.save, f'X_{step}.png'))
             plt.scatter(list(ls.keys()), list(ls.values()))
             plt.axvline(x=eta, color='b')

@@ -17,7 +17,7 @@ from torchvision.utils import make_grid
 import torchvision.transforms as transforms
 from torchvision import datasets
 
-import dataloaders
+import datasets
 import networks
 import utils
 
@@ -215,17 +215,17 @@ trans = transforms.Compose([transforms.Resize([args.img_size_x, args.img_size_y]
                             ])
 print('Initializing training and testing datasets...')
 if args.dataset == 'mnist':
-    ds = dataloaders.mnist_loader(args.N, args.T, train=True, seed=7, transform=trans)
-    ds_test = dataloaders.mnist_loader(10, args.T, train=False, seed=7, transform=trans)
+    ds = datasets.mnist_loader(args.N, args.T, train=True, seed=7, transform=trans)
+    ds_test = datasets.mnist_loader(10, args.T, train=False, seed=7, transform=trans)
 elif args.dataset == 'cifar10':
-    ds = dataloaders.cifar10_loader(args.N, args.T, train=True, seed=7, transform=trans)
-    ds_test = dataloaders.cifar10_loader(10, args.T, train=False, seed=7, transform=trans)
+    ds = datasets.cifar10_loader(args.N, args.T, train=True, seed=7, transform=trans)
+    ds_test = datasets.cifar10_loader(10, args.T, train=False, seed=7, transform=trans)
 elif args.dataset == 'celeba':
-    ds = dataloaders.celeba_gender_change(args.N, args.T, train=True, seed=7, transform=trans)
-    ds_test = dataloaders.celeba_gender_change(10, args.T, train=False, seed=7, transform=trans)
+    ds = datasets.celeba_gender_change(args.N, args.T, train=True, seed=7, transform=trans)
+    ds_test = datasets.celeba_gender_change(10, args.T, train=False, seed=7, transform=trans)
 elif args.dataset == 'clevr':
-    ds = dataloaders.clevr_change('n=2100T=50', args.T, transform=trans)
-    ds_test = dataloaders.clevr_change('n=2100T=50', args.T, transform=trans)
+    ds = datasets.clevr_change('n=2100T=50', args.T, transform=trans)
+    ds_test = datasets.clevr_change('n=2100T=50', args.T, transform=trans)
 else:
     raise Exception("invalid dataset name")
 
