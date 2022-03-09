@@ -50,6 +50,88 @@ args = parser.parse_args()
 img_shape = (args.channels, args.dim_x, args.dim_y)
 ################################################################################
 
+def test(model, ds, dir, iterations):
+    print("Running tests...")
+    if args.test_method == "graph-cut":
+        test_dir = "errors_graph_cut"
+    else:
+        test_dir = "errors_mean_distance"
+    test_dir_path = path.join(dir, test_dir)
+    if not path.exists(test_dir_path):
+        os.makedirs(test_dir_path)
+
+    # start testing
+    eta_hats = []  # save predicted change points
+    etas = []
+    # iterate over test samples X_1, X_2, etc...
+    all_i = range(ds.n) if not args.dataset == "clevr" else [args.T*6*(i-1)+j for i in range(1, 7) for j in range(5)]
+    for i in all_i:
+        etas.append(ds.cps[i])
+        # load test sample X_i
+        X = ds.get_time_series_sample(i).to(device)
+
+        scores = {}  # save errors for all candidate etas
+        min_eta = 2
+        max_eta = ds.T - 2
+        max_score = -float("inf")
+        eta_hat, min_G1, min_G2 = -1, None, None
+        for eta in range(min_eta, max_eta + 1):
+            # get reconstructions and errors of 2 groups
+            if args.test_method == "graph-cut":
+                score = graph_cut(model, ds, X, eta, only_c=False)
+            else:
+                get_recon = get_recon_plain if iterations == 0 else get_recon_minimize
+                G1, G1_error = get_recon(X[0:eta], torch.zeros(eta, 1), model)
+                G2, G2_error = get_recon(X[eta:ds.T], torch.zeros(ds.T - eta, 1), model)
+                score = - (G1_error.detach().item() + G2_error.detach().item())
+            scores[eta] = score.detach().item()
+            if score > max_score:
+                max_score = score
+                eta_hat = eta
+                # min_G1 = G1
+                # min_G2 = G2
+        eta_hats.append(eta_hat)
+
+        # # decode(s=0, c)
+        # G1_onlyc, _ = get_recon_onlyc(X[0:eta_hat], torch.zeros(eta_hat, 1), model)
+        # G2_onlyc, _ = get_recon_onlyc(X[eta_hat:ds.T], torch.zeros(ds.T-eta_hat, 1), model)
+        #
+        # # color change points
+        # # blue strip for original images
+        # X[etas[i] - 1][0, :, -5:-1] = X[etas[i] - 1][1, :, -5:-1] = 0
+        # X[etas[i] - 1][2, :, -5:-1] = 255
+        # # red strip for reconstructions
+        # min_G1[-1][0, :, -5:-1] = 255
+        # min_G1[-1][1, :, -5:-1] = min_G1[-1][2, :, -5:-1] = 0
+        # # red strip for fixed c
+        # G1_onlyc[-1][0, :, -5:-1] = 255
+        # G1_onlyc[-1][1, :, -5:-1] = G1_onlyc[-1][2, :, -5:-1] = 0
+        # grid = make_grid(torch.cat([X,   min_G1, min_G2,   G1_onlyc, G2_onlyc]), nrow=ds.T)
+        # save_image(grid, path.join(test_dir_path, "X_{}.png".format(i)))
+
+        # save errors
+        plt.scatter(list(scores.keys()), list(scores.values()))
+        plt.axvline(x=ds.cps[i])
+        plt.axvline(x=eta_hat, color="r")
+        plt.xlabel("etas (red: eta_hat, blue: true eta)")
+        plt.ylabel("errors")
+        plt.savefig(path.join(test_dir_path, "X_{}_errors.png".format(i)))
+        plt.close()
+
+    # compute mean of |eta-eta_hat| among all test samples
+    diff = np.abs(np.asarray(etas) - np.asarray(eta_hats))
+    score_mean = np.mean(diff)
+    score_std = np.std(diff)
+    # keep track of the errors associated with epochs
+    with open(path.join(test_dir_path, "error.txt"), "w") as f:
+        json.dump({"mean": score_mean, "std": score_std}, f, indent=2)
+    # save etas and eta_hats
+    with open(test_dir_path + "/cps.txt", "w") as cps_r:
+        for tmp in eta_hats:
+            cps_r.write("{} ".format(tmp))
+        cps_r.write("\n")
+        for tmp in etas:
+            cps_r.write("{} ".format(tmp))
 
 def graph_cut(model, ds, X, eta, only_c = True):
     s_mu, _, c_mu, _ = model.encode(X)

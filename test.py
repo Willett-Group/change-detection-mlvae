@@ -99,7 +99,7 @@ def main():
         'mnist': range(10),
         'cifar10': range(10),
         'cifar100': range(100),
-        'celeba': [20]
+        'celeba': [4, 9, 17, 20, 24]
     }
     test_data_ts = datasets.TS(
         datapath=args.datapath,
@@ -116,7 +116,10 @@ def main():
         batch_size=test_data_ts.T)
 
     ckpt = torch.load(Path('runs', args.model_path, 'checkpoint.pth.tar'))
-    model = networks.SiameseNet(arch='cnn').to(device)
+    if args.dataset in ['mnist', 'cifar10', 'cifar100']:
+        model = networks.SiameseNet32(arch='cnn').to(device)
+    else:
+        model = networks.SiameseNet128(arch='cnn').to(device)
     model.load_state_dict(ckpt['model'])
     model.eval()
 
@@ -124,6 +127,7 @@ def main():
     for step, (input, _) in enumerate(test_queue_ts): # step = n, input = X_n
         input = input.to(device)
         T = input.size(0)
+
 
         scores = np.zeros((T, T))
         for t1 in range(T):
@@ -150,7 +154,8 @@ def main():
         ls = {} # eta: L(eta)
         min_l = float('inf')
         eta_hat = None
-        for eta in range(2, test_data_ts.T - 1):
+        min_t = 2
+        for eta in range(min_t, test_data_ts.T - min_t + 1):
             l = PairsGroupsLoss(scores, eta, variant=args.loss_variant)
             ls[eta] = l
             if l < min_l:

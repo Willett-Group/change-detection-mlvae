@@ -1,13 +1,8 @@
-#!/bin/bash
-
-for b in 1
-do
-  python mlvae.py --dataset mnist --nepochs 50 --model linearmlvae --cs_dim 50 \
-  --beta $b --test 1 --log_file 'log.txt'
-done
-
-#for itr in 100
-#do
-#  python mlvae.py --dataset mnist --nepochs 50 --model linearmlvae --cs_dim 50 \
-#   --test 1 --iterations $itr --log_file 'log.txt'
-#done
+python mlvae_train.py \
+--dataset cifar10 \
+--n_max 1000 \
+--t_max 50 \
+--cs_dim 50 \
+--batch_size 50 \
+--seed 0 \
+--output_dir runs/cifar10/mlvae.fc/debug
